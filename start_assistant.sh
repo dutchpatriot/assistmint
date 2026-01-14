@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # Navigate to the project directory
-cd /home/itunicorn/ai/assistmint
+cd /home/marco/Work/ai/llm/assistmint
 
 # Activate the virtual environment
-source assistmintenv/bin/activate
+source venv/bin/activate
 
 # Run the main.py script
 python main.py

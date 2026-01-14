@@ -1,9 +1,13 @@
 from speech_recognition import list_microphones, select_microphone_and_samplerate, vosk_speech_to_text
 from calendar_manager import add_event_to_calendar, check_calendar, remove_event, clear_calendar
-from jan_ai import ask_jan
+from ollama import ask_ollama, select_ollama_model
 from text_to_speech import speak
 
 def main():
+    # Select Ollama model
+    select_ollama_model()
+
+    # Select microphone
     input_devices = list_microphones()
     selected_device, samplerate = select_microphone_and_samplerate(input_devices)
     
@@ -73,10 +77,10 @@ def main():
 
                         remove_event(event_name, event_date)
 
-                    elif "ask jan" in transcription.lower():
-                        speak("What would you like to ask Jan?", speed=1.5)
-                        question = vosk_speech_to_text(selected_device, samplerate).strip()
-                        ask_jan(question)
+                    elif "hey google" in transcription.lower():
+                        speak("What would you like to ask?", speed=1.5)
+                        question = vosk_speech_to_text(selected_device, samplerate, extended_listen=True).strip()
+                        ask_ollama(question)
 
                     else:
                         print("Command not recognized.")
@@ -143,10 +147,10 @@ def main():
 
                     remove_event(event_name, event_date)
 
-                elif "ask jan" in command:
-                    speak("What would you like to ask Jan?", speed=1.5)
+                elif "hey google" in command:
+                    speak("What would you like to ask?", speed=1.5)
                     question = input("Enter your question: ").strip()
-                    ask_jan(question)
+                    ask_ollama(question)
 
                 else:
                     print("Unknown command.")
