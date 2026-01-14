@@ -1,110 +1,176 @@
 import sounddevice as sd
-import vosk
 import queue
-import json
-import os
 import time
+import numpy as np
+import tempfile
+import wave
+
+# Lazy load - deferred to avoid startup delay
+_device = None
+_compute_type = None
+_whisper_model = None
+_WhisperModel = None
+
+def get_device():
+    global _device, _compute_type
+    if _device is None:
+        try:
+            import torch
+            if torch.cuda.is_available():
+                print("[STT] Using CUDA (GPU)")
+                _device, _compute_type = "cuda", "float16"
+            else:
+                print("[STT] Using CPU (no CUDA)")
+                _device, _compute_type = "cpu", "int8"
+        except ImportError:
+            print("[STT] Using CPU (no torch)")
+            _device, _compute_type = "cpu", "int8"
+    return _device, _compute_type
+
+def init_whisper(model_size="base"):
+    """Initialize Whisper model. Sizes: tiny, base, small, medium, large-v2"""
+    global _whisper_model, _WhisperModel
+    if _whisper_model is None:
+        # Lazy import
+        if _WhisperModel is None:
+            print("[STT] Loading faster-whisper library...")
+            from faster_whisper import WhisperModel
+            _WhisperModel = WhisperModel
+
+        device, compute_type = get_device()
+        print(f"[STT] Loading Whisper model '{model_size}' on {device}...")
+        _whisper_model = _WhisperModel(model_size, device=device, compute_type=compute_type)
+        print("[STT] Whisper ready!")
+    return _whisper_model
 
 def list_microphones():
     devices = sd.query_devices()
-    input_devices = [device for device in devices if device['max_input_channels'] > 0]
+    input_devices = []
+    for i, device in enumerate(devices):
+        if device['max_input_channels'] > 0:
+            dev = dict(device)
+            dev['index'] = i
+            input_devices.append(dev)
     for i, device in enumerate(input_devices):
-        print(f"{i}: {device['name']}")
+        print(f"{i}: {device['name']} (device {device['index']})")
     return input_devices
 
+def get_default_microphone(input_devices):
+    """Get first available microphone without prompting."""
+    selected_device = input_devices[0]
+    samplerate = selected_device['default_samplerate']
+    print(f"Using microphone: {selected_device['name']} ({samplerate} Hz)")
+    return selected_device, samplerate
+
 def select_microphone_and_samplerate(input_devices):
-    device_index = int(input("Select the microphone by entering the corresponding number: "))
-    selected_device = input_devices[device_index]
-    
-    device_info = sd.query_devices(device_index)
-    samplerates = device_info['default_samplerate']
-    
-    max_sample_rate = samplerates
-
+    choice = int(input("Select the microphone by entering the corresponding number: "))
+    selected_device = input_devices[choice]
+    samplerate = selected_device['default_samplerate']
     print(f"Selected microphone: {selected_device['name']}")
-    print(f"Highest supported sample rate: {max_sample_rate} Hz")
-    
-    return selected_device, max_sample_rate
+    print(f"Sample rate: {samplerate} Hz")
+    return selected_device, samplerate
 
-def vosk_speech_to_text(selected_device, samplerate, model_path="vosk-model/vosk-model-small-en-us-0.15", extended_listen=False):
-    """Function to capture audio from the selected microphone and use Vosk to transcribe.
+def whisper_speech_to_text(selected_device, samplerate, extended_listen=False):
+    """Record audio and transcribe with Whisper.
 
     Args:
-        extended_listen: If True, waits for a longer pause (3 sec) before returning.
-                        Useful for longer questions to Ollama.
+        extended_listen: If True, waits for longer pause before transcribing.
     """
-    if not os.path.exists(model_path):
-        print(f"Model not found at {model_path}. Please ensure the model is correctly placed.")
-        return ""
-
-    model = vosk.Model(model_path)
+    model = init_whisper()
     q = queue.Queue()
+    audio_buffer = []
 
     def callback(indata, frames, time_info, status):
         if status:
             print(status)
-        q.put(bytes(indata))
+        q.put(indata.copy())
 
-    # Increased blocksize and latency for more stable performance
     try:
-        with sd.RawInputStream(samplerate=int(samplerate), blocksize=8192, latency='high', device=selected_device['index'], dtype='int16', channels=1, callback=callback):
+        with sd.InputStream(samplerate=int(samplerate), blocksize=4096,
+                           device=selected_device['index'], dtype='float32',
+                           channels=1, callback=callback):
+
             if extended_listen:
-                print("# Take your time, speak your full question... (3 sec pause to finish)")
+                print("# Speak your question... (pause to finish)")
             else:
                 print("# Say something!")
 
-            rec = vosk.KaldiRecognizer(model, samplerate)
+            peak_db = -60.0
+            drop_start = None
+            speech_started = False
+            silence_threshold = 0.75 if extended_listen else 0.5
 
-            if extended_listen:
-                # Extended mode: collect all text until 3 seconds of silence
-                full_text = []
-                last_speech_time = time.time()
-                silence_timeout = 3.0  # seconds of silence before returning
+            while True:
+                try:
+                    data = q.get(timeout=0.3)
+                except queue.Empty:
+                    continue
 
-                while True:
-                    try:
-                        data = q.get(timeout=0.5)
-                    except queue.Empty:
-                        # Check if we've been silent long enough
-                        if full_text and (time.time() - last_speech_time) > silence_timeout:
-                            break
-                        continue
+                audio_buffer.append(data)
 
-                    if rec.AcceptWaveform(data):
-                        result = rec.Result()
-                        text = json.loads(result).get('text', '')
-                        if text:
-                            full_text.append(text)
-                            last_speech_time = time.time()
-                            print(f"Detected: {text}")
-                    else:
-                        partial_result = rec.PartialResult()
-                        partial = json.loads(partial_result).get('partial', '')
-                        if partial:
-                            last_speech_time = time.time()
-                            print(f"Partial: {partial}")
+                # Calculate dB
+                rms = np.sqrt(np.mean(data ** 2)) if len(data) > 0 else 0
+                current_db = 20 * np.log10(rms) if rms > 1e-10 else -60.0
 
-                # Get any remaining text
-                final = rec.FinalResult()
-                final_text = json.loads(final).get('text', '')
-                if final_text:
-                    full_text.append(final_text)
+                # Track peak (ignore clipped)
+                if current_db > peak_db and current_db < -5:
+                    peak_db = current_db
+                    drop_start = None
+                    if current_db > -35:
+                        speech_started = True
 
-                combined = ' '.join(full_text)
-                print(f"Full question: {combined}")
-                return combined
-            else:
-                # Original quick mode
-                while True:
-                    data = q.get()
-                    if rec.AcceptWaveform(data):
-                        result = rec.Result()
-                        text = json.loads(result).get('text', '')
-                        print(f"Detected: {text}")
-                        return text
-                    else:
-                        partial_result = rec.PartialResult()
-                        print(f"Partial: {json.loads(partial_result).get('partial', '')}")
+                # Show dB meter
+                bar_len = int((current_db + 60) / 60 * 20)
+                bar = '█' * max(0, min(20, bar_len)) + '░' * (20 - max(0, min(20, bar_len)))
+                print(f"\r[{bar}] {current_db:5.1f}dB ", end='', flush=True)
+
+                # Check for silence after speech
+                if speech_started and current_db < (peak_db - 12):
+                    if drop_start is None:
+                        drop_start = time.time()
+                    elif (time.time() - drop_start) > silence_threshold:
+                        print()  # Newline after meter
+                        break
+                else:
+                    drop_start = None
+
+        # Convert buffer to numpy array
+        if not audio_buffer:
+            return ""
+
+        audio_data = np.concatenate(audio_buffer, axis=0).flatten()
+
+        # Check if there was actual audio (not just silence)
+        rms = np.sqrt(np.mean(audio_data ** 2))
+        avg_db = 20 * np.log10(rms) if rms > 1e-10 else -60.0
+        if avg_db < -45:  # Too quiet, probably no speech
+            print(f"[STT] Skipping - too quiet ({avg_db:.1f}dB)")
+            return ""
+
+        # Save to temp WAV file (Whisper needs file input)
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            temp_path = f.name
+            with wave.open(f.name, 'wb') as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)  # 16-bit
+                wf.setframerate(int(samplerate))
+                wf.writeframes((audio_data * 32767).astype(np.int16).tobytes())
+
+        # Transcribe
+        print("[STT] Transcribing...")
+        segments, info = model.transcribe(temp_path, beam_size=5)
+        text = " ".join([seg.text for seg in segments]).strip()
+
+        # Cleanup
+        import os
+        os.unlink(temp_path)
+
+        print(f"[STT] Result: {text}")
+        return text
+
     except Exception as e:
-        print(f"An error occurred during audio processing: {e}")
+        print(f"\nAn error occurred during audio processing: {e}")
     return ""
+
+# Alias for compatibility
+vosk_speech_to_text = whisper_speech_to_text

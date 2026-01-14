@@ -1,6 +1,19 @@
+# Python packages
 requests
 TTS
-vosk
+faster-whisper
 sounddevice
 dateparser
+openwakeword
+scipy
+numpy
+
+# Optional: vosk (legacy, replaced by faster-whisper)
+# vosk
+
+# Optional: torch with CUDA for GPU acceleration
+# pip install torch --index-url https://download.pytorch.org/whl/cu118
+
+# System packages (install via apt):
+# sudo apt install remind sox alsa-utils python3.11 python3.11-venv
 

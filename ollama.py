@@ -1,9 +1,39 @@
 import requests
 import json
+import os
 from text_to_speech import speak
 
 # Global variable to store selected model
 selected_model = "mistral"
+
+# Session memory
+SESSION_FILE = os.path.expanduser("~/.assistmint_session.json")
+MAX_MESSAGES = 30
+messages = []
+
+def load_session():
+    """Load session from JSON file."""
+    global messages
+    if os.path.exists(SESSION_FILE):
+        try:
+            with open(SESSION_FILE, 'r') as f:
+                messages = json.load(f)
+            print(f"[SESSION] Loaded {len(messages)} messages")
+        except:
+            messages = []
+    return messages
+
+def save_session():
+    """Save session to JSON file."""
+    with open(SESSION_FILE, 'w') as f:
+        json.dump(messages, f, indent=2)
+
+def clear_session():
+    """Clear session history."""
+    global messages
+    messages = []
+    save_session()
+    print("[SESSION] Cleared")
 
 def list_ollama_models():
     """Fetch available models from Ollama."""
@@ -15,6 +45,13 @@ def list_ollama_models():
     except requests.ConnectionError:
         print("Could not connect to Ollama. Make sure it's running.")
     return []
+
+def set_model(model_name):
+    """Set model directly without prompting."""
+    global selected_model
+    selected_model = model_name
+    print(f"Using model: {selected_model}")
+    return selected_model
 
 def select_ollama_model():
     """Let user select a model from available Ollama models."""
@@ -43,15 +80,23 @@ def select_ollama_model():
 
 def ask_ollama(question):
     """Send a question to Ollama and return the answer."""
+    global messages
+
+    # Add user message to history
+    messages.append({"role": "user", "content": question})
+
+    # Trim if over limit
+    if len(messages) > MAX_MESSAGES:
+        messages = messages[-MAX_MESSAGES:]
+
     url = "http://localhost:11434/v1/chat/completions"  # Ollama API
     payload = {
         "model": selected_model,  # Use selected model
         "messages": [
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": question},
-        ],
+            {"role": "system", "content": "You are a helpful voice assistant. Keep responses short and concise - 1-2 sentences max. No lists or lengthy explanations unless explicitly asked."},
+        ] + messages,
         "stream": False,
-        "max_tokens": 2048,
+        "max_tokens": 150,  # Keep responses short for voice
         "stop": None,
         "frequency_penalty": 0,
         "presence_penalty": 0,
@@ -73,13 +118,19 @@ def ask_ollama(question):
 
         if response.status_code == 200:
             answer = response.json().get("choices", [{}])[0].get("message", {}).get("content", "Sorry, I couldn't get a response.")
-            speak(answer, speed=1.5)
+            # Add assistant response to history
+            messages.append({"role": "assistant", "content": answer})
+            save_session()
+            return speak(answer, speed=1.5)
         else:
-            speak("An error occurred while trying to communicate with Ollama.", speed=1.5)
+            speak("An error occurred while trying to communicate with Ollama.", speed=1.5, interruptable=False)
+            return False
     except requests.ConnectionError:
         print("Connection error: Unable to reach the Ollama API.")
-        speak("Please make sure Ollama is running.", speed=1.5)
+        speak("Please make sure Ollama is running.", speed=1.5, interruptable=False)
+        return False
     except requests.RequestException as e:
         print(f"API request failed: {e}")
-        speak("An error occurred while trying to communicate with Ollama.", speed=1.5)
+        speak("An error occurred while trying to communicate with Ollama.", speed=1.5, interruptable=False)
+        return False
 

@@ -5,6 +5,37 @@ import dateparser
 from text_to_speech import speak
 import time
 
+# Word to number mapping for date parsing
+WORD_TO_NUM = {
+    "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+    "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+    "ten": "10", "eleven": "11", "twelve": "12", "thirteen": "13",
+    "fourteen": "14", "fifteen": "15", "sixteen": "16", "seventeen": "17",
+    "eighteen": "18", "nineteen": "19", "twenty": "20", "thirty": "30",
+    "first": "1", "second": "2", "third": "3", "fourth": "4", "fifth": "5",
+    "sixth": "6", "seventh": "7", "eighth": "8", "ninth": "9", "tenth": "10",
+    "eleventh": "11", "twelfth": "12", "thirteenth": "13", "fourteenth": "14",
+    "fifteenth": "15", "sixteenth": "16", "seventeenth": "17", "eighteenth": "18",
+    "nineteenth": "19", "twentieth": "20", "thirtieth": "30", "thirty first": "31",
+}
+
+def words_to_numbers(text):
+    """Convert spoken numbers to digits. Handles compound numbers like 'twenty six' -> '26'."""
+    text = text.lower().strip()
+
+    # Handle compound years like "twenty twenty six" -> "2026"
+    text = re.sub(r'twenty twenty (\w+)', lambda m: '20' + WORD_TO_NUM.get(m.group(1), m.group(1)), text)
+
+    # Handle compound numbers like "twenty eight" -> "28"
+    text = re.sub(r'twenty (\w+)', lambda m: '2' + WORD_TO_NUM.get(m.group(1), m.group(1)), text)
+    text = re.sub(r'thirty (\w+)', lambda m: '3' + WORD_TO_NUM.get(m.group(1), m.group(1)), text)
+
+    # Replace remaining single words
+    for word, num in WORD_TO_NUM.items():
+        text = re.sub(r'\b' + word + r'\b', num, text)
+
+    return text
+
 def parse_event(line):
     time_pattern = r'AT (\d{1,2}:\d{2})'
     time_match = re.search(time_pattern, line)
@@ -33,7 +64,35 @@ def parse_event(line):
     return (None, line.split('MSG')[-1].strip())
 
 def parse_time(time_str):
-    """Parses time in natural language like 'seven am', 'three thirty pm', etc., and converts it to 'H:MM AM/PM' format."""
+    """Parses time in natural language or numeric format and converts to 'H:MM AM/PM' format."""
+    time_str = time_str.lower().strip()
+    # Normalize A.M./P.M. variations to am/pm
+    time_str = re.sub(r'a\.?m\.?', 'am', time_str)
+    time_str = re.sub(r'p\.?m\.?', 'pm', time_str)
+    # Remove "hours" / "hour" / "uur" noise
+    time_str = re.sub(r'\s*(hours?|uur)\s*', ':', time_str)
+    # Clean up multiple colons or leading colon
+    time_str = re.sub(r':+', ':', time_str).strip(':')
+
+    # Handle numeric formats first (e.g., "1130", "11:30", "1130 am")
+    numeric_match = re.match(r'^(\d{1,2}):?(\d{2})?\s*(am|pm)?$', time_str)
+    if numeric_match:
+        hour = int(numeric_match.group(1))
+        minutes = numeric_match.group(2) or "00"
+        period = numeric_match.group(3)
+
+        # If no period specified, guess based on hour
+        if not period:
+            if hour >= 7 and hour <= 11:
+                period = "am"
+            else:
+                period = "pm"
+            # Handle 24h format
+            if hour > 12:
+                hour -= 12
+                period = "pm"
+
+        return f"{hour}:{minutes} {period.upper()}"
 
     # Mapping of number words to digits for both hours and minutes
     num_words = {
@@ -92,7 +151,12 @@ def parse_time(time_str):
 def parse_date(date_str):
     """Parses natural language dates like 'today', 'tomorrow', 'this Friday', or 'August 29'."""
     now = datetime.now()
-    parsed_date = dateparser.parse(date_str)
+
+    # Convert spoken words to numbers first
+    converted = words_to_numbers(date_str)
+    print(f"[DATE] '{date_str}' -> '{converted}'")
+
+    parsed_date = dateparser.parse(converted)
 
     if parsed_date is None:
         speak(f"Sorry, I couldn't understand the date {date_str}.", speed=1.5)
@@ -159,9 +223,11 @@ def check_calendar(date="today", week=False, specific_week_start=None):
 
         print(f"Attempting to retrieve calendar events for the week of {start_date.strftime('%A, %B %d')} through {end_date.strftime('%A, %B %d')}...")
     else:
-        if date.lower() == "today":
+        date_lower = date.lower().strip()
+        # Handle variations like "for today", "today's", etc.
+        if "today" in date_lower:
             start_date = end_date = datetime.now().date()
-        elif date.lower() == "tomorrow":
+        elif "tomorrow" in date_lower:
             start_date = end_date = (datetime.now().date() + timedelta(days=1))
         else:
             parsed_date = parse_date(date)
