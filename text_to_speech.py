@@ -5,6 +5,7 @@ import numpy as np
 import sounddevice as sd
 from TTS.api import TTS
 import re
+from config import INTERRUPT_DB, INTERRUPT_DURATION
 
 # Initialize Coqui TTS engine globally
 tts = TTS(model_name="tts_models/en/ljspeech/tacotron2-DDC", progress_bar=True, gpu=False)
@@ -93,8 +94,8 @@ def speak(text, speed=1.5, interruptable=True):
     start_time = time.time()
 
     loud_start = None
-    loud_threshold_db = -25
-    loud_duration = 0.3  # 300ms sustained = break
+    loud_threshold_db = INTERRUPT_DB
+    loud_duration = INTERRUPT_DURATION
 
     try:
         with sd.InputStream(samplerate=16000, channels=1, dtype='float32', blocksize=1600) as stream:

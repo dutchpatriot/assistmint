@@ -4,6 +4,7 @@ import time
 import numpy as np
 import tempfile
 import wave
+from config import SILENCE_SKIP_DB, SPEECH_START_DB, SILENCE_DROP_DB
 
 # Lazy load - deferred to avoid startup delay
 _device = None
@@ -116,7 +117,7 @@ def whisper_speech_to_text(selected_device, samplerate, extended_listen=False):
                 if current_db > peak_db and current_db < -5:
                     peak_db = current_db
                     drop_start = None
-                    if current_db > -35:
+                    if current_db > SPEECH_START_DB:
                         speech_started = True
 
                 # Show dB meter
@@ -125,7 +126,7 @@ def whisper_speech_to_text(selected_device, samplerate, extended_listen=False):
                 print(f"\r[{bar}] {current_db:5.1f}dB ", end='', flush=True)
 
                 # Check for silence after speech
-                if speech_started and current_db < (peak_db - 12):
+                if speech_started and current_db < (peak_db - SILENCE_DROP_DB):
                     if drop_start is None:
                         drop_start = time.time()
                     elif (time.time() - drop_start) > silence_threshold:
@@ -143,7 +144,7 @@ def whisper_speech_to_text(selected_device, samplerate, extended_listen=False):
         # Check if there was actual audio (not just silence)
         rms = np.sqrt(np.mean(audio_data ** 2))
         avg_db = 20 * np.log10(rms) if rms > 1e-10 else -60.0
-        if avg_db < -45:  # Too quiet, probably no speech
+        if avg_db < SILENCE_SKIP_DB:  # Too quiet, probably no speech
             print(f"[STT] Skipping - too quiet ({avg_db:.1f}dB)")
             return ""
 

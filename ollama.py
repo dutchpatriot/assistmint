@@ -6,9 +6,10 @@ from text_to_speech import speak
 # Global variable to store selected model
 selected_model = "mistral"
 
+from config import SYSTEM_PROMPT, MAX_TOKENS, MAX_MESSAGES, TEMPERATURE, TOP_P, FREQUENCY_PENALTY, PRESENCE_PENALTY
+
 # Session memory
 SESSION_FILE = os.path.expanduser("~/.assistmint_session.json")
-MAX_MESSAGES = 30
 messages = []
 
 def load_session():
@@ -93,15 +94,15 @@ def ask_ollama(question):
     payload = {
         "model": selected_model,  # Use selected model
         "messages": [
-            {"role": "system", "content": "You are a helpful voice assistant. Keep responses short and concise - 1-2 sentences max. No lists or lengthy explanations unless explicitly asked."},
+            {"role": "system", "content": SYSTEM_PROMPT},
         ] + messages,
         "stream": False,
-        "max_tokens": 150,  # Keep responses short for voice
+        "max_tokens": MAX_TOKENS,
         "stop": None,
-        "frequency_penalty": 0,
-        "presence_penalty": 0,
-        "temperature": 0.7,
-        "top_p": 0.95
+        "frequency_penalty": FREQUENCY_PENALTY,
+        "presence_penalty": PRESENCE_PENALTY,
+        "temperature": TEMPERATURE,
+        "top_p": TOP_P
     }
     headers = {"Content-Type": "application/json"}
 
