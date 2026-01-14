@@ -4,7 +4,7 @@ import time
 import numpy as np
 import tempfile
 import wave
-from config import SILENCE_SKIP_DB, SPEECH_START_DB, SILENCE_DROP_DB
+from config import SILENCE_SKIP_DB, SPEECH_START_DB, SILENCE_DROP_DB, SILENCE_DURATION, SILENCE_DURATION_EXT
 
 # Lazy load - deferred to avoid startup delay
 _device = None
@@ -99,7 +99,7 @@ def whisper_speech_to_text(selected_device, samplerate, extended_listen=False):
             peak_db = -60.0
             drop_start = None
             speech_started = False
-            silence_threshold = 0.75 if extended_listen else 0.5
+            silence_threshold = SILENCE_DURATION_EXT if extended_listen else SILENCE_DURATION
 
             while True:
                 try:

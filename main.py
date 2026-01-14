@@ -59,27 +59,28 @@ def process_voice_command(transcription, selected_device, samplerate):
         blue = "\033[94m"
         reset = "\033[0m"
         print(f"""
-{blue}╔══════════════════════════════════════════╗
-║           AVAILABLE COMMANDS             ║
-╠══════════════════════════════════════════╣
-║ 📅 CALENDAR                              ║
-║    • "Add to calendar"                   ║
-║    • "Check my agenda"                   ║
-║    • "Remove event"                      ║
-╠══════════════════════════════════════════╣
-║ 💬 QUESTIONS                             ║
-║    • Just ask me anything                ║
-╠══════════════════════════════════════════╣
-║ 🎓 LEARNING                              ║
-║    • "Learn that" / "Correct that"       ║
-║    • "Show corrections"                  ║
-╠══════════════════════════════════════════╣
-║ 🧠 SESSION                               ║
-║    • "Clear session" / "Vergeet alles"   ║
-╠══════════════════════════════════════════╣
-║ 🛑 INTERRUPT                             ║
-║    • Speak loudly to interrupt TTS       ║
-╚══════════════════════════════════════════╝{reset}
+{blue}╔════════════════════════════════════════════════════════════════════════════════╗
+║                              AVAILABLE COMMANDS                                ║
+╠════════════════════════════════════════════════════════════════════════════════╣
+║ 📅 CALENDAR              │ 💬 QUESTIONS            │ 🎓 LEARNING               ║
+║    • "Add to calendar"   │    • Just ask anything  │    • "Learn that"         ║
+║    • "Check my agenda"   │                         │    • "Correct that"       ║
+║    • "Remove event"      │                         │    • "Show corrections"   ║
+╠════════════════════════════════════════════════════════════════════════════════╣
+║ 🧠 SESSION               │ 💻 TERMINAL             │ 🛑 INTERRUPT              ║
+║    • "Clear session"     │    • "Run command"      │    • Speak loudly to      ║
+║    • "Vergeet alles"     │    • "Execute"          │      interrupt TTS        ║
+╠════════════════════════════════════════════════════════════════════════════════╣
+║ ✍️ DICTATION - "Dictate" / "Dicteer" → "Stop" to end                           ║
+╠════════════════════════════════════════════════════════════════════════════════╣
+║ DICTATION GRAMMAR                                                              ║
+║ Case:    "capital X" "lowercase X" "all caps X" "hoofdletter X"                ║
+║ Punct:   "period/punt" "comma/komma" "question mark" "exclamation mark"        ║
+║ Format:  "new line" "new paragraph" "tab" "space"                              ║
+║ Symbols: "at sign" "hashtag" "slash" "underscore" "hyphen" "asterisk"          ║
+║ Brackets: "open/close parenthesis" "open/close bracket" "open/close brace"    ║
+║ Quotes:  "quote" "single quote" "aanhalingsteken" "apostrof"                   ║
+╚════════════════════════════════════════════════════════════════════════════════╝{reset}
 """)
         if not quiet_help:
             speak("Calendar: say add to calendar, check my agenda, or remove event. Questions: just ask me anything. Learning: say learn that or correct that. Session: say clear session to forget everything.", speed=1.4)
@@ -153,6 +154,109 @@ def process_voice_command(transcription, selected_device, samplerate):
         event_date = vosk_speech_to_text(selected_device, samplerate).strip()
 
         remove_event(event_name, event_date)
+
+    # Dictation mode
+    elif any(w in transcription_lower for w in ["dictate", "dicteer", "type this", "start typing"]):
+        print("[CMD] → Dictation mode")
+        speak("Dictating. Say stop to end.", speed=1.5)
+
+        import subprocess
+        while True:
+            text = vosk_speech_to_text(selected_device, samplerate, extended_listen=True).strip()
+            text_lower = text.lower()
+
+            # Stop triggers
+            if any(w in text_lower for w in ["stop dictation", "stop dicteren", "stop typing", "klaar"]) or text_lower == "stop":
+                speak("Dictation ended.", speed=1.5)
+                break
+
+            if text:
+                # Process case instructions
+                import re
+                text = re.sub(r'\b(capital|uppercase|hoofdletter)\s+(\w+)', lambda m: m.group(2).upper(), text, flags=re.IGNORECASE)
+                text = re.sub(r'\b(lowercase|kleine letter)\s+(\w+)', lambda m: m.group(2).lower(), text, flags=re.IGNORECASE)
+                text = re.sub(r'\ball caps\s+(\w+)', lambda m: m.group(1).upper(), text, flags=re.IGNORECASE)
+
+                # Punctuation and grammar
+                replacements = {
+                    "period": ".", "punt": ".", "point": ".",
+                    "comma": ",", "komma": ",",
+                    "question mark": "?", "vraagteken": "?",
+                    "exclamation mark": "!", "uitroepteken": "!",
+                    "colon": ":", "dubbele punt": ":",
+                    "semicolon": ";", "puntkomma": ";",
+                    "new line": "\n", "nieuwe regel": "\n", "enter": "\n",
+                    "new paragraph": "\n\n", "nieuwe paragraaf": "\n\n",
+                    "tab": "\t",
+                    "space": " ", "spatie": " ",
+                    "at sign": "@", "apenstaartje": "@",
+                    "hashtag": "#", "hash": "#",
+                    "dollar sign": "$", "dollar": "$",
+                    "percent": "%", "procent": "%",
+                    "ampersand": "&", "en teken": "&",
+                    "asterisk": "*", "sterretje": "*",
+                    "underscore": "_", "liggend streepje": "_",
+                    "hyphen": "-", "min": "-", "dash": "-",
+                    "slash": "/", "schuine streep": "/",
+                    "backslash": "\\",
+                    "open parenthesis": "(", "haakje openen": "(",
+                    "close parenthesis": ")", "haakje sluiten": ")",
+                    "open bracket": "[", "close bracket": "]",
+                    "open brace": "{", "close brace": "}",
+                    "quote": '"', "aanhalingsteken": '"',
+                    "single quote": "'", "apostrof": "'",
+                }
+                for word, symbol in replacements.items():
+                    text = re.sub(r'\b' + word + r'\b', symbol, text, flags=re.IGNORECASE)
+
+                print(f"[DICTATE] Typing: {text}")
+                # Type into active window
+                subprocess.run(["xdotool", "type", "--", text + " "], check=False)
+        return
+
+    # Terminal command execution
+    elif any(w in transcription_lower for w in ["run command", "execute", "terminal", "shell"]):
+        print("[CMD] → Terminal command")
+        speak("What command?", speed=1.5)
+        command = vosk_speech_to_text(selected_device, samplerate, extended_listen=True).strip()
+
+        if command:
+            # Process case instructions
+            import re
+            # "capital X" / "uppercase X" / "hoofdletter X" → X
+            command = re.sub(r'\b(capital|uppercase|hoofdletter)\s+(\w+)', lambda m: m.group(2).upper(), command, flags=re.IGNORECASE)
+            # "lowercase X" / "kleine letter X" → x
+            command = re.sub(r'\b(lowercase|kleine letter)\s+(\w+)', lambda m: m.group(2).lower(), command, flags=re.IGNORECASE)
+            # "all caps WORD" → WORD
+            command = re.sub(r'\ball caps\s+(\w+)', lambda m: m.group(1).upper(), command, flags=re.IGNORECASE)
+            # Filter non-ASCII and punctuation for TTS
+            command_safe = ''.join(c for c in command if ord(c) < 128 and c not in '.?!,;:')
+            command_safe = command_safe.strip()
+            print(f"[CMD] Command requested: {command}")
+            if not command_safe:
+                speak("I didn't understand the command.", speed=1.5)
+                return
+            speak(f"Run {command_safe}, yes or no?", speed=1.5)
+            confirm = vosk_speech_to_text(selected_device, samplerate).strip().lower()
+
+            if any(w in confirm for w in ["yes", "ja", "yep", "do it", "go ahead"]):
+                print(f"[CMD] Executing: {command}")
+                import subprocess
+                try:
+                    result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
+                    output = result.stdout or result.stderr or "Command completed with no output."
+                    # Truncate long output
+                    if len(output) > 200:
+                        output = output[:200] + "... truncated"
+                    print(f"[CMD] Output: {output}")
+                    speak(output, speed=1.4)
+                except subprocess.TimeoutExpired:
+                    speak("Command timed out after 30 seconds.", speed=1.5)
+                except Exception as e:
+                    speak(f"Error: {str(e)}", speed=1.5)
+            else:
+                speak("Cancelled.", speed=1.5)
+        return
 
     else:
         # Default: send to Ollama as a question
