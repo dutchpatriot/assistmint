@@ -2,11 +2,12 @@ import requests
 import json
 import os
 from text_to_speech import speak
+from colors import session
 
 # Global variable to store selected model
 selected_model = "mistral"
 
-from config import SYSTEM_PROMPT, MAX_TOKENS, MAX_MESSAGES, TEMPERATURE, TOP_P, FREQUENCY_PENALTY, PRESENCE_PENALTY
+from config import SYSTEM_PROMPT, MAX_TOKENS, MAX_MESSAGES, TEMPERATURE, TOP_P, FREQUENCY_PENALTY, PRESENCE_PENALTY, VERBOSE_SESSION, DEBUG_API, SESSION_ENABLED
 
 # Session memory
 SESSION_FILE = os.path.expanduser("~/.assistmint_session.json")
@@ -15,17 +16,23 @@ messages = []
 def load_session():
     """Load session from JSON file."""
     global messages
+    if not SESSION_ENABLED:
+        messages = []
+        return messages
     if os.path.exists(SESSION_FILE):
         try:
             with open(SESSION_FILE, 'r') as f:
                 messages = json.load(f)
-            print(f"[SESSION] Loaded {len(messages)} messages")
+            if VERBOSE_SESSION:
+                print(session(f"Loaded {len(messages)} messages"))
         except:
             messages = []
     return messages
 
 def save_session():
     """Save session to JSON file."""
+    if not SESSION_ENABLED:
+        return
     with open(SESSION_FILE, 'w') as f:
         json.dump(messages, f, indent=2)
 
@@ -34,7 +41,8 @@ def clear_session():
     global messages
     messages = []
     save_session()
-    print("[SESSION] Cleared")
+    if VERBOSE_SESSION:
+        print(session("Cleared"))
 
 def list_ollama_models():
     """Fetch available models from Ollama."""
@@ -86,8 +94,8 @@ def ask_ollama(question):
     # Add user message to history
     messages.append({"role": "user", "content": question})
 
-    # Trim if over limit
-    if len(messages) > MAX_MESSAGES:
+    # Trim if over limit (0 = unlimited)
+    if MAX_MESSAGES > 0 and len(messages) > MAX_MESSAGES:
         messages = messages[-MAX_MESSAGES:]
 
     url = "http://localhost:11434/v1/chat/completions"  # Ollama API
@@ -106,16 +114,17 @@ def ask_ollama(question):
     }
     headers = {"Content-Type": "application/json"}
 
-    # Print the API call details for debugging
-    print("API Call Information:")
-    print(f"URL: {url}")
-    print(f"Headers: {headers}")
-    print(f"Payload: {json.dumps(payload, indent=4)}")
+    if DEBUG_API:
+        print("API Call Information:")
+        print(f"URL: {url}")
+        print(f"Headers: {headers}")
+        print(f"Payload: {json.dumps(payload, indent=4)}")
 
     try:
         response = requests.post(url, headers=headers, data=json.dumps(payload))
-        print(f"Response Status Code: {response.status_code}")
-        print(f"Response Content: {response.content.decode('utf-8')}")
+        if DEBUG_API:
+            print(f"Response Status Code: {response.status_code}")
+            print(f"Response Content: {response.content.decode('utf-8')}")
 
         if response.status_code == 200:
             answer = response.json().get("choices", [{}])[0].get("message", {}).get("content", "Sorry, I couldn't get a response.")

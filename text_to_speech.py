@@ -5,7 +5,8 @@ import numpy as np
 import sounddevice as sd
 from TTS.api import TTS
 import re
-from config import INTERRUPT_DB, INTERRUPT_DURATION
+from config import INTERRUPT_DB, INTERRUPT_DURATION, TTS_MAX_CHARS
+from colors import tts as tts_log
 
 # Initialize Coqui TTS engine globally
 tts = TTS(model_name="tts_models/en/ljspeech/tacotron2-DDC", progress_bar=True, gpu=False)
@@ -59,71 +60,120 @@ def clean_text(text):
 
     return text
 
+
+def split_into_chunks(text, max_chars=TTS_MAX_CHARS):
+    """Split text into chunks on sentence boundaries to prevent TTS babbling."""
+    if len(text) <= max_chars:
+        return [text]
+
+    chunks = []
+    # Split on sentence boundaries
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+
+    current_chunk = ""
+    for sentence in sentences:
+        # If single sentence is too long, split on commas/semicolons
+        if len(sentence) > max_chars:
+            sub_parts = re.split(r'(?<=[,;:])\s+', sentence)
+            for part in sub_parts:
+                if len(current_chunk) + len(part) + 1 <= max_chars:
+                    current_chunk = (current_chunk + " " + part).strip()
+                else:
+                    if current_chunk:
+                        chunks.append(current_chunk)
+                    # If part itself is too long, force split
+                    if len(part) > max_chars:
+                        words = part.split()
+                        current_chunk = ""
+                        for word in words:
+                            if len(current_chunk) + len(word) + 1 <= max_chars:
+                                current_chunk = (current_chunk + " " + word).strip()
+                            else:
+                                if current_chunk:
+                                    chunks.append(current_chunk)
+                                current_chunk = word
+                    else:
+                        current_chunk = part
+        elif len(current_chunk) + len(sentence) + 1 <= max_chars:
+            current_chunk = (current_chunk + " " + sentence).strip()
+        else:
+            if current_chunk:
+                chunks.append(current_chunk)
+            current_chunk = sentence
+
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    return chunks
+
+
 def speak(text, speed=1.5, interruptable=True):
     """Function to speak the provided text with SoX tempo adjustment.
 
     Returns True if interrupted, False otherwise.
+    Splits long text into chunks to prevent TTS babbling.
     """
     text = clean_text(text)
 
-    print(f"[TTS] Speaking: {text[:100]}..." if len(text) > 100 else f"[TTS] Speaking: {text}")
+    print(tts_log(f"Speaking: {text[:100]}...") if len(text) > 100 else tts_log(f"Speaking: {text}"))
 
     if not text or text.isspace():
         return False
 
+    # Split into chunks to prevent tacotron2 babbling
+    chunks = split_into_chunks(text)
     output_file = "response.wav"
-    try:
-        tts.tts_to_file(text=text, file_path=output_file)
-    except Exception as e:
-        print(f"TTS error: {e}")
-        return False
 
-    if not interruptable:
-        os.system(f"play -q {output_file} tempo {speed}")
-        time.sleep(0.3)
-        return False
+    for i, chunk in enumerate(chunks):
+        if not chunk or chunk.isspace():
+            continue
 
-    # Interruptable playback with mic monitoring
-    process = subprocess.Popen(
-        ["play", "-q", output_file, "tempo", str(speed)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
-    )
+        try:
+            tts.tts_to_file(text=chunk, file_path=output_file)
+        except Exception as e:
+            print(f"TTS error on chunk {i+1}: {e}")
+            continue
 
-    interrupted = False
-    start_time = time.time()
+        if not interruptable:
+            os.system(f"play -q {output_file} tempo {speed}")
+            continue
 
-    loud_start = None
-    loud_threshold_db = INTERRUPT_DB
-    loud_duration = INTERRUPT_DURATION
+        # Interruptable playback with mic monitoring
+        process = subprocess.Popen(
+            ["play", "-q", output_file, "tempo", str(speed)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
 
-    try:
-        with sd.InputStream(samplerate=16000, channels=1, dtype='float32', blocksize=1600) as stream:
-            while process.poll() is None:
-                audio, _ = stream.read(1600)
+        start_time = time.time()
+        loud_start = None
 
-                # Grace period - ignore first 0.3s
-                if time.time() - start_time < 0.3:
-                    continue
+        try:
+            with sd.InputStream(samplerate=16000, channels=1, dtype='float32', blocksize=1600) as stream:
+                while process.poll() is None:
+                    audio, _ = stream.read(1600)
 
-                rms = np.sqrt(np.mean(audio ** 2))
-                db = 20 * np.log10(rms) if rms > 1e-10 else -60.0
+                    # Grace period - ignore first 0.3s
+                    if time.time() - start_time < 0.3:
+                        continue
 
-                # Track sustained loud audio
-                if db > loud_threshold_db:
-                    if loud_start is None:
-                        loud_start = time.time()
-                    elif time.time() - loud_start > loud_duration:
-                        print(f"\n[TTS] Break detected! (sustained {db:.1f}dB)")
-                        process.terminate()
-                        interrupted = True
-                        break
-                else:
-                    loud_start = None  # Reset if quiet
-    except Exception as e:
-        # Fallback - just wait for process
-        process.wait()
+                    rms = np.sqrt(np.mean(audio ** 2))
+                    db = 20 * np.log10(rms) if rms > 1e-10 else -60.0
+
+                    # Track sustained loud audio
+                    if db > INTERRUPT_DB:
+                        if loud_start is None:
+                            loud_start = time.time()
+                        elif time.time() - loud_start > INTERRUPT_DURATION:
+                            print(f"\n{tts_log(f'Break detected! (sustained {db:.1f}dB)')}")
+                            process.terminate()
+                            time.sleep(0.3)
+                            return True  # Interrupted - stop all chunks
+                    else:
+                        loud_start = None
+        except Exception as e:
+            process.wait()
 
     time.sleep(0.3)
-    return interrupted
+    return False
 
