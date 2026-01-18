@@ -195,6 +195,17 @@ def process_command(text: str, context: ModuleContext, loader) -> bool:
         _show_help()
         return True
 
+    # PRIORITY: Clear session (before any other processing)
+    clear_session_triggers = ["clear session", "forget everything", "vergeet alles", "wis sessie"]
+    if any(t in text_lower for t in clear_session_triggers):
+        try:
+            from modules.chat.module import clear_session
+            clear_session()
+            speak("Sessie gewist." if "vergeet" in text_lower or "wis" in text_lower else "Session cleared.", interruptable=False)
+        except ImportError:
+            speak("Could not clear session.")
+        return True
+
     # PRIORITY: Language switching (before any other processing)
     try:
         from config import LANG_SWITCH_EN, LANG_SWITCH_NL, LANG_SWITCH_AUTO

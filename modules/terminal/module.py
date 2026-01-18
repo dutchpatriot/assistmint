@@ -402,15 +402,15 @@ class TerminalModule(BaseModule):
             print(log_cmd(f"Skipped hallucination: '{text}'"))
             return ModuleResult(text="I didn't catch that.", success=False)
 
-        # Process the command text (NATO spelling, etc.)
-        processed_text = self._process_command_text(text)
-
-        # Try to resolve as alias first
-        command = self._resolve_alias(processed_text)
+        # Try to resolve as alias FIRST (before symbol processing)
+        # This prevents "disk space" becoming "disk " before alias lookup
+        command = self._resolve_alias(text)
 
         if command:
             source = "alias"
         else:
+            # Only process symbols if not an alias
+            processed_text = self._process_command_text(text)
             command = processed_text
             source = "direct"
 
@@ -494,19 +494,44 @@ class TerminalModule(BaseModule):
         print(log_cmd(f"Executing{'(background)' if background else ''}: {command}"))
 
         if background:
-            # Run in background with nohup
+            # Run in background with output to log file + popup tail window
             try:
-                # Start process detached from terminal
+                import time
+                timestamp = int(time.time())
+                log_file = f"/tmp/assistmint_bg_{timestamp}.log"
+
+                # Start the command in background, output to log file
                 subprocess.Popen(
-                    f"nohup {command} > /tmp/assistmint_bg_$$.log 2>&1 &",
+                    f"nohup {command} > {log_file} 2>&1 &",
                     shell=True,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     start_new_session=True
                 )
-                print(log_cmd("Command started in background"))
+
+                # Open a terminal window with tail -f on the log
+                # Try different terminal emulators
+                terminal_cmd = None
+                for term in ["gnome-terminal", "xfce4-terminal", "konsole", "xterm"]:
+                    if subprocess.run(["which", term], capture_output=True).returncode == 0:
+                        if term == "gnome-terminal":
+                            terminal_cmd = f"{term} --title='Background: {command[:30]}' -- tail -f {log_file}"
+                        elif term == "xfce4-terminal":
+                            terminal_cmd = f"{term} --title='Background: {command[:30]}' -e 'tail -f {log_file}'"
+                        elif term == "konsole":
+                            terminal_cmd = f"{term} --title 'Background: {command[:30]}' -e tail -f {log_file}"
+                        else:  # xterm
+                            terminal_cmd = f"{term} -title 'Background: {command[:30]}' -e tail -f {log_file}"
+                        break
+
+                if terminal_cmd:
+                    subprocess.Popen(terminal_cmd, shell=True, start_new_session=True)
+                    print(log_cmd(f"Background started with tail window: {log_file}"))
+                else:
+                    print(log_cmd(f"Background started (no terminal found): {log_file}"))
+
                 return ModuleResult(
-                    text="Started in background. Check /tmp/assistmint_bg_*.log for output.",
+                    text=f"Running in background. Log: {log_file}",
                     success=True
                 )
             except Exception as e:

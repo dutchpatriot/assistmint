@@ -16,6 +16,19 @@ from core.modules.base import BaseModule, ModuleResult, ModuleContext, ModuleCap
 from core.audio.tts import speak, get_language, detect_language
 from core.logger import session
 
+
+def _fix_sentence_spacing(text: str) -> str:
+    """Fix missing spaces after punctuation (some models output 'zin een.zin twee')."""
+    if not text:
+        return text
+    # Add space after . ! ? if followed by letter/digit (not already spaced)
+    text = re.sub(r'([.!?])([A-Za-z0-9])', r'\1 \2', text)
+    # Also fix common issues: number.letter, letter.number
+    text = re.sub(r'(\d)\.([A-Za-z])', r'\1. \2', text)
+    # Remove [/INST] tags that some models leak
+    text = re.sub(r'\s*\[/?INST\]\s*', ' ', text)
+    return text.strip()
+
 # Import config values
 try:
     from config import (
@@ -275,6 +288,8 @@ class ChatModule(BaseModule):
 
             if response.status_code == 200:
                 answer = response.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+                # Fix spacing issues (some models output "zin een.zin twee" without space)
+                answer = _fix_sentence_spacing(answer)
                 self._messages.append({"role": "assistant", "content": answer})
                 self.save_session()
                 return answer

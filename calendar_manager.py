@@ -523,7 +523,48 @@ def parse_date(date_str, silent=False, lang=None):
 
     # Convert spoken words to numbers first
     converted = words_to_numbers(date_str)
+    date_lower = converted.lower().strip()
     print(f"[DATE] '{date_str}' -> '{converted}' (lang={lang})")
+
+    # === DIRECT HANDLING for common Dutch/English dates ===
+    # Handle these BEFORE dateparser to avoid issues
+
+    # Today / Vandaag
+    if date_lower in ["today", "vandaag", "nu", "now"]:
+        return now
+
+    # Tomorrow / Morgen
+    if date_lower in ["tomorrow", "morgen", "morgn"]:
+        return now + timedelta(days=1)
+
+    # Day after tomorrow / Overmorgen
+    if date_lower in ["day after tomorrow", "overmorgen", "over morgen"]:
+        return now + timedelta(days=2)
+
+    # Yesterday / Gisteren
+    if date_lower in ["yesterday", "gisteren"]:
+        return now - timedelta(days=1)
+
+    # Next week (without specific day) = same day next week
+    if date_lower in ["next week", "volgende week"]:
+        return now + timedelta(days=7)
+
+    # This week (without specific day) = today
+    if date_lower in ["this week", "deze week"]:
+        return now
+
+    # === WEEK NUMBER support (week 4, week 5, etc.) ===
+    week_match = re.match(r'^week\s*(\d+)$', date_lower)
+    if week_match:
+        week_num = int(week_match.group(1))
+        # Get first day (Monday) of that week number in current year
+        year = now.year
+        # If the week is in the past, assume next year
+        first_day_of_week = datetime.strptime(f'{year}-W{week_num:02d}-1', '%Y-W%W-%w')
+        if first_day_of_week < now - timedelta(days=7):  # More than a week in the past
+            first_day_of_week = datetime.strptime(f'{year + 1}-W{week_num:02d}-1', '%Y-W%W-%w')
+        print(f"[DATE] Week {week_num} -> {first_day_of_week.strftime('%Y-%m-%d')}")
+        return first_day_of_week
 
     # Configure dateparser with language priority
     # Dutch first if NL mode, otherwise English first
@@ -544,7 +585,7 @@ def parse_date(date_str, silent=False, lang=None):
     }
 
     # Pre-convert Dutch words to English for better dateparser support
-    converted_lower = converted.lower()
+    converted_lower = date_lower
     for nl, en in dutch_date_map.items():
         converted_lower = converted_lower.replace(nl, en)
 

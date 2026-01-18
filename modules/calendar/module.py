@@ -82,39 +82,48 @@ def _extract_calendar_with_llm(text: str, lang: str = "en") -> dict:
         text: User input text
         lang: Language ('en' or 'nl') - determines system prompt
     """
-    # Bilingual extraction prompt
+    # Ensure text ends with space (LLM parsing issue fix)
+    text = text.strip() + " "
+
+    # Bilingual extraction prompt - STRICT: use EXACT values from input!
     if lang == "nl":
-        prompt = f"""Extraheer agenda-afspraak details uit deze tekst. Geef ALLEEN geldige JSON terug, niets anders.
+        prompt = f"""Extraheer agenda-afspraak details uit deze tekst. Geef ALLEEN geldige JSON terug.
 
 Tekst: "{text}"
 
-Extraheer (gebruik null als niet genoemd):
-- event: naam/titel van de afspraak
-- date: datum (morgen, maandag, 15 jan, volgende week dinsdag, etc.)
-- start: starttijd (15:00, 3 uur, half 4, etc.)
-- end: eindtijd (als genoemd, anders null)
-- location: locatie/adres (als genoemd)
-- description: extra notities (als genoemd)
-- reminder: herinnering in minuten voor afspraak (bijv. "herinner me 1 uur van tevoren" = 60)
+BELANGRIJK: Gebruik de EXACTE waarden uit de tekst! NIET omzetten!
+- Als user zegt "20 januari 2026" → date: "20 januari 2026" (NIET "volgende week")
+- Als user zegt "17:00" → start: "17:00" (NIET "5 uur")
+- Als user zegt "twee uur van tevoren" → reminder: 120 (2 uur = 120 minuten)
 
-Geef JSON zoals: {{"event": "vergadering", "date": "morgen", "start": "15:00", "end": null, "location": "kantoor", "description": null, "reminder": 30}}
+Extraheer:
+- event: naam/titel van de afspraak
+- date: EXACTE datum zoals genoemd (20 januari, morgen, maandag, etc.)
+- start: EXACTE starttijd zoals genoemd (17:00, 3 uur, half 4)
+- end: eindtijd (null als niet genoemd)
+- location: locatie/adres (null als niet genoemd)
+- description: extra notities (null als niet genoemd)
+- reminder: GETAL in minuten (1 uur = 60, 2 uur = 120, 30 min = 30)
 
 JSON:"""
     else:
-        prompt = f"""Extract calendar event details from this text. Return ONLY valid JSON, nothing else.
+        prompt = f"""Extract calendar event details from this text. Return ONLY valid JSON.
 
 Text: "{text}"
 
-Extract (use null if not mentioned):
-- event: event name/title
-- date: date (tomorrow, monday, 15 jan, morgen, maandag, volgende week dinsdag, etc.)
-- start: start time (3pm, 15:00, 3 uur, half 4, etc.)
-- end: end time (if mentioned, otherwise null)
-- location: location/place/address (if mentioned)
-- description: additional notes/details (if mentioned)
-- reminder: reminder in minutes before event (if mentioned, e.g. "remind me 1 hour before" = 60)
+IMPORTANT: Use EXACT values from text! DO NOT convert!
+- If user says "January 20 2026" → date: "January 20 2026" (NOT "next week")
+- If user says "5pm" → start: "5pm" (NOT "17:00")
+- If user says "two hours before" → reminder: 120 (2 hours = 120 minutes)
 
-Return JSON like: {{"event": "meeting", "date": "tomorrow", "start": "15:00", "end": null, "location": "office", "description": null, "reminder": 30}}
+Extract:
+- event: event name/title
+- date: EXACT date as stated (January 20, tomorrow, monday, etc.)
+- start: EXACT start time as stated (5pm, 15:00, half 4)
+- end: end time (null if not mentioned)
+- location: location/address (null if not mentioned)
+- description: notes (null if not mentioned)
+- reminder: NUMBER in minutes (1 hour = 60, 2 hours = 120, 30 min = 30)
 
 JSON:"""
 
@@ -144,7 +153,10 @@ JSON:"""
 try:
     from config import (
         CALENDAR_MAX_RETRIES, CALENDAR_CANCEL_WORDS, CALENDAR_PROMPTS,
-        CALENDAR_ASK_LANGUAGE, CALENDAR_LANG_EN, CALENDAR_LANG_NL
+        CALENDAR_ASK_LANGUAGE, CALENDAR_LANG_EN, CALENDAR_LANG_NL,
+        CALENDAR_WORDS, CALENDAR_REMOVE_PREFIXES, CALENDAR_CHECK_WORDS,
+        CALENDAR_CLEAR_WORDS, CALENDAR_REMOVE_WORDS, CALENDAR_ADD_WORDS,
+        CALENDAR_REMOVE_ALL_PHRASES
     )
 except ImportError:
     CALENDAR_MAX_RETRIES = 2
@@ -153,6 +165,13 @@ except ImportError:
     CALENDAR_ASK_LANGUAGE = False
     CALENDAR_LANG_EN = ["english", "engels"]
     CALENDAR_LANG_NL = ["dutch", "nederlands"]
+    CALENDAR_WORDS = ["calendar", "agenda", "event", "meeting", "appointment", "afspraak"]
+    CALENDAR_REMOVE_PREFIXES = ("remove ", "delete ", "verwijder ", "wis ")
+    CALENDAR_CHECK_WORDS = ["what", "check", "show", "bekijk", "toon"]
+    CALENDAR_CLEAR_WORDS = ["clear", "delete all", "wis alles"]
+    CALENDAR_REMOVE_WORDS = ["remove event", "verwijder afspraak"]
+    CALENDAR_ADD_WORDS = ["add", "create", "voeg toe"]
+    CALENDAR_REMOVE_ALL_PHRASES = ["remove all", "alles verwijderen", "allemaal"]
 
 
 class CalendarModule(BaseModule):
@@ -207,31 +226,23 @@ class CalendarModule(BaseModule):
         if intent in ["add_calendar", "check_calendar", "clear_calendar", "remove_calendar"]:
             return 1.0
 
-        # Check for calendar keywords (EN + NL)
-        cal_words = ["calendar", "calander", "agenda", "schedule", "event", "meeting", "appointment",
-                     "afspraak", "afspraken", "afsprake", "vergadering", "bijeenkomst"]
-        has_cal = any(w in text_lower for w in cal_words)
+        # Check for calendar keywords (using config.py values)
+        has_cal = any(w in text_lower for w in CALENDAR_WORDS)
+
+        # Also check if starts with remove prefix (e.g., "Remove meeting...")
+        starts_with_remove = text_lower.startswith(CALENDAR_REMOVE_PREFIXES)
+        if starts_with_remove:
+            return 0.95  # High confidence for removal
 
         if has_cal:
-            # Check for action words (EN + NL)
-            # NOTE: For "add" with natural language, we return LOW confidence
-            # so the LLM/ChatModule handles extraction via CALENDAR_PENDING
-            add_words = ["add", "put", "create", "new", "schedule", "set", "plan", "book",
-                        "voeg toe", "toevoegen", "nieuwe", "maak", "zet", "plaats", "afspraak"]
-            check_words = ["what", "check", "show", "list", "today", "tomorrow", "this week", "next week",
-                          "wat", "bekijk", "toon", "welke", "vandaag", "morgen", "deze week", "volgende week", "staat er op"]
-            clear_words = ["clear", "delete all", "remove all", "empty", "leeg", "wis alles", "verwijder alles"]
-            remove_words = ["remove", "delete", "cancel", "verwijder", "annuleer"]
-
-            if any(w in text_lower for w in add_words):
-                # Calendar module handles ALL calendar add requests
-                # Uses _extract_calendar_with_llm for natural language extraction
-                return 0.95  # High confidence for all add requests
-            if any(w in text_lower for w in check_words):
+            # Check for action words (using config.py values)
+            if any(w in text_lower for w in CALENDAR_ADD_WORDS):
+                return 0.95  # High confidence for add requests
+            if any(w in text_lower for w in CALENDAR_CHECK_WORDS):
                 return 0.9
-            if any(w in text_lower for w in clear_words):
+            if any(w in text_lower for w in CALENDAR_CLEAR_WORDS):
                 return 0.9
-            if any(w in text_lower for w in remove_words):
+            if any(w in text_lower for w in CALENDAR_REMOVE_WORDS):
                 return 0.9
             return 0.7
 
@@ -259,29 +270,21 @@ class CalendarModule(BaseModule):
                 return self._handle_remove()
 
         # PRIORITY 2: Keyword fallback (when no intent)
-        cal_words = ["calendar", "calander", "agenda", "schedule", "event", "meeting", "appointment", "alarm",
-                     "afspraak", "afspraken", "afsprake", "vergadering", "bijeenkomst"]
-        has_cal = any(w in text_lower for w in cal_words)
-
-        # Check words FIRST (before add) to avoid "bekijk mijn afspraak" matching "afspraak" in add_words
-        check_words = ["what", "check", "show", "list", "today", "tomorrow", "this week", "next week",
-                      "wat", "bekijk", "toon", "welke", "vandaag", "morgen", "deze week", "volgende week",
-                      "staat er op", "heb ik", "what's on", "what do i have"]
-        clear_words = ["clear", "delete all", "remove all", "empty", "leeg", "wis alles", "verwijder alles"]
-        remove_words = ["remove event", "delete event", "cancel event", "remove appointment",
-                        "verwijder afspraak", "wis afspraak", "annuleer afspraak", "afspraak verwijderen",
-                        "verwijder een afspraak", "afspraak wissen"]
-        add_words = ["add", "put", "create", "new", "schedule", "set", "plan", "book",
-                    "voeg toe", "toevoegen", "nieuwe", "maak", "zet", "plaats"]
+        # All trigger words are now in config.py for easy customization
+        has_cal = any(w in text_lower for w in CALENDAR_WORDS)
 
         # Check order matters! Check/clear/remove before add (more specific first)
-        if has_cal and any(w in text_lower for w in check_words):
+        # REMOVE check: "remove" or "delete" at START of sentence = removal intent
+        starts_with_remove = text_lower.startswith(CALENDAR_REMOVE_PREFIXES)
+
+        if has_cal and any(w in text_lower for w in CALENDAR_CHECK_WORDS):
             return self._handle_check()
-        elif has_cal and any(w in text_lower for w in clear_words):
+        elif has_cal and any(w in text_lower for w in CALENDAR_CLEAR_WORDS):
             return self._handle_clear()
-        elif has_cal and any(w in text_lower for w in remove_words):
+        elif starts_with_remove or (has_cal and any(w in text_lower for w in CALENDAR_REMOVE_WORDS)):
+            # "Remove meeting..." or "Remove event..." or "Verwijder afspraak..."
             return self._handle_remove()
-        elif has_cal and any(w in text_lower for w in add_words):
+        elif has_cal and any(w in text_lower for w in CALENDAR_ADD_WORDS):
             return self._handle_add(initial_text=context.text)
         elif has_cal:
             # Has calendar word but no clear action - assume add
@@ -917,8 +920,8 @@ class CalendarModule(BaseModule):
         """Remove specific event from calendar with interactive selection."""
         from calendar_manager import get_events_on_date, remove_event_by_uid, parse_date
 
-        print(cmd("Calendar REMOVE"))
         lang = get_language()
+        print(cmd(f"Calendar REMOVE (lang={lang})"))
 
         # Step 1: Ask for date
         def validate_date(d):
@@ -944,6 +947,7 @@ class CalendarModule(BaseModule):
             return ModuleResult(text=msg, success=True)
 
         # Step 3: List events numbered
+        print(f"[CAL] Listing {len(events)} events:")
         if lang == "nl":
             speak(f"Er zijn {len(events)} afspraken:")
         else:
@@ -953,7 +957,7 @@ class CalendarModule(BaseModule):
             time_part = f" at {ev['time_str']}" if ev['time_str'] else ""
             if lang == "nl":
                 time_part = f" om {ev['time_str']}" if ev['time_str'] else ""
-            print(f"  {i}. {ev['name']}{time_part}")
+            print(f"  {i}. {ev['name']}{time_part} (uid: {ev['uid'][:20]}...)")
             speak(f"{i}. {ev['name']}{time_part}")
 
         # Step 4: Ask which to remove
@@ -970,8 +974,13 @@ class CalendarModule(BaseModule):
 
         # Step 5: Parse response and remove
         removed_count = 0
+        print(f"[CAL] Selection response: '{response}'")
 
-        if response in ["all", "alles", "allemaal", "everything"]:
+        # Check for "remove all" / "delete all" / "alles verwijderen" etc.
+        # NOTE: "all" or "alles" alone is NOT enough - must be full phrase (see config.py)
+        matched_all = [p for p in CALENDAR_REMOVE_ALL_PHRASES if p in response]
+        if matched_all:
+            print(f"[CAL] Matched 'all' phrase: {matched_all}")
             # Remove all events
             for ev in events:
                 if remove_event_by_uid(ev['uid']):
@@ -981,33 +990,55 @@ class CalendarModule(BaseModule):
             return ModuleResult(text=msg, success=True)
 
         # Parse number(s) from response
-        numbers = re.findall(r'\d+', response)
+        print(f"[CAL] Raw response: '{response}'")
+        numbers = re.findall(r'\b\d+\b', response)  # Word boundary for digits
+        print(f"[CAL] Digit matches: {numbers}")
 
-        # Also check for number words
+        # Also check for number words (EN + NL) - with word boundaries!
         word_to_num = {
-            "one": 1, "een": 1, "first": 1, "eerste": 1,
-            "two": 2, "twee": 2, "second": 2, "tweede": 2,
-            "three": 3, "drie": 3, "third": 3, "derde": 3,
-            "four": 4, "vier": 4, "fourth": 4, "vierde": 4,
-            "five": 5, "vijf": 5, "fifth": 5, "vijfde": 5,
+            # English - longer phrases first to avoid partial matches
+            "the first": 1, "the second": 2, "the third": 3, "the fourth": 4, "the fifth": 5,
+            "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
+            "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10,
+            "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+            "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+            # Dutch - longer phrases first
+            "nummer een": 1, "nummer twee": 2, "nummer drie": 3,
+            "nummer vier": 4, "nummer vijf": 5,
+            "de eerste": 1, "de tweede": 2, "de derde": 3,
+            "de vierde": 4, "de vijfde": 5,
+            "eerste": 1, "tweede": 2, "derde": 3, "vierde": 4, "vijfde": 5,
+            "zesde": 6, "zevende": 7, "achtste": 8, "negende": 9, "tiende": 10,
+            "een": 1, "twee": 2, "drie": 3, "vier": 4, "vijf": 5,
+            "zes": 6, "zeven": 7, "acht": 8, "negen": 9, "tien": 10,
         }
         for word, num in word_to_num.items():
-            if word in response:
+            # Use word boundary regex to avoid partial matches (e.g., "een" in "geen")
+            if re.search(rf'\b{re.escape(word)}\b', response):
                 numbers.append(str(num))
+                print(f"[CAL] Word match: '{word}' -> {num}")
 
         if not numbers:
             speak("I didn't understand which event." if lang == "en" else "Ik begreep niet welke afspraak.")
             return ModuleResult(text="Not understood.", success=False)
 
         # Remove selected events
+        print(f"[CAL] Numbers to remove: {numbers}")
+        print(f"[CAL] Total events: {len(events)}")
         removed_names = []
         for num_str in set(numbers):  # Use set to avoid duplicates
             num = int(num_str)
+            print(f"[CAL] Processing number {num}")
             if 1 <= num <= len(events):
                 ev = events[num - 1]
-                if remove_event_by_uid(ev['uid']):
+                print(f"[CAL] Removing: {ev['name']} (uid: {ev['uid'][:20]}...)")
+                success = remove_event_by_uid(ev['uid'])
+                print(f"[CAL] Remove result: {success}")
+                if success:
                     removed_count += 1
                     removed_names.append(ev['name'])
+            else:
+                print(f"[CAL] Number {num} out of range (1-{len(events)})")
 
         if removed_count > 0:
             if removed_count == 1:

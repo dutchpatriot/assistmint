@@ -86,7 +86,7 @@ echo "jarvis 1 starting......"
 python main.py --model qwen2.5:7b --voice --no-commands --device 2
 else
 echo "Jarvis 2 starting...."
-  python main_modular.py --voice --model qwen2.5:3b --model-nl bramvanroy/fietje-2b-chat:q4_K_M --no-commands --device 3              
+  python3.12 main_modular.py --voice --model qwen2.5:3b --model-nl bramvanroy/fietje-2b-chat:q4_K_M --no-commands --device 2
 
 #python main_modular.py --model qwen2.5:3b --voice --no-commands --device 2
 fi

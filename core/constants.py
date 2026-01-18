@@ -123,6 +123,13 @@ WHISPER_HALLUCINATIONS = [
     "tv gelderland", "tv gelderland 2021", "tv gelderland 2020", "tv gelderland 2019",
     "nos journaal", "rtl nieuws", "omroep gelderland", "omroep brabant",
     "ondertiteling", "ondertiteling tuvalu", "ondertitels", "copyright",
+    # Dutch YouTube outro phrases
+    "bedankt voor het kijken", "bedankt voor 't kijken", "dank voor het kijken",
+    "bedankt voor het luisteren", "dank je wel voor het kijken",
+    "tot de volgende keer", "tot de volgende", "tot ziens",
+    "vergeet niet te abonneren", "abonneer je", "like en abonneer",
+    "druk op de bel", "klik op de bel", "schakel notificaties in",
+    "klik hier", "klik hier voor meer", "klik op de link", "link in beschrijving",
     # Single words / fillers
     "the", "a", "i", "it", "so", "and", "but", "or", "um", "uh", "oh",
     "hmm", "hm", "ah", "eh", "er", "mm", "mhm", "yeah", "yep", "nope",

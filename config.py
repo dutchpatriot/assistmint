@@ -8,7 +8,7 @@ OLLAMA_API_URL = "http://localhost:11434"
 # Timeouts (seconds) - increase on slower systems
 OLLAMA_CHECK_TIMEOUT = 2        # Fast check if Ollama is running
 OLLAMA_LIST_TIMEOUT = 5         # List available models
-OLLAMA_COMPLETION_TIMEOUT = 120 # Main chat completion (longer for complex responses)
+OLLAMA_COMPLETION_TIMEOUT = 180 # Main chat completion (longer for complex responses)
 OLLAMA_PARSE_TIMEOUT = 15       # Calendar/extraction parsing (simpler tasks)
 
 # Default system prompt (English)
@@ -33,11 +33,17 @@ When user confirms (yes/ja/okay), output ONLY:
 Added!"""
 
 # Dutch system prompt
-SYSTEM_PROMPT_NL = """Je bent een Nederlandse spraakassistent.
+SYSTEM_PROMPT_NL = """Je bent een Nederlandse spraakassistent genaamd Jarvis.
 
-BELANGRIJKSTE REGEL: Antwoord UITSLUITEND in het Nederlands! Geen Engels! Nooit! Zelfs als de gebruiker Engels spreekt, antwoord je in het Nederlands.
+⚠️ TAALREGEL - ABSOLUUT EN ONHERROEPELIJK:
+- Antwoord ALTIJD in het Nederlands
+- NOOIT Engels gebruiken, zelfs niet één woord
+- Als de gebruiker Engels spreekt, antwoord je TOCH in het Nederlands
+- Vertaal Engelse termen naar Nederlands (trust = stichting/trust, meeting = vergadering)
+- Bij twijfel: Nederlands!
 
-Houd antwoorden kort en duidelijk.
+Je bent een Nederlandse PhD in Rechten met expertise in vermogensrecht en estate planning.
+Houd antwoorden duidelijk en informatief.
 
 AGENDA TOEVOEGEN: Wanneer de gebruiker een afspraak wil inplannen, extraheer de details en vraag bevestiging.
 
@@ -62,7 +68,7 @@ Toegevoegd!"""
 # === MODEL CONFIGURATION ===
 # Default models
 DEFAULT_MODEL = "qwen2.5:3b"                      # English/fallback (1.9GB)
-DEFAULT_MODEL_NL = "bramvanroy/fietje-2b-chat:q4_K_M"  # Dutch (1.7GB - smallest!)
+DEFAULT_MODEL_NL = "bramvanroy/fietje-2b-chat:q8_0" #"bramvanroy/fietje-2b-chat:q4_K_M"  # Dutch (1.7GB - smallest!)
 MODEL_AUTO_SWITCH = True           # Auto-switch based on detected language
 
 # Per-model settings (override defaults)
@@ -70,25 +76,33 @@ MODEL_AUTO_SWITCH = True           # Auto-switch based on detected language
 MODEL_SETTINGS = {
     # Qwen models - good multilingual, needs moderate creativity
     "qwen2.5:3b": {
-        "max_tokens": 750,
+        "max_tokens": 1750,
         "temperature": 0.77,
         "top_p": 0.91,
         "frequency_penalty": 0.42,
         "presence_penalty": 0.38,
     },
+    "bramvanroy/fietje-2b-chat:q8_0": {
+        "max_tokens": 600,
+        "temperature": 0.1,
+        "top_p": 0.87,
+        "frequency_penalty": 0.75,
+        "presence_penalty": 0.75,
+    },
+
     "qwen2.5:7b": {
-        "max_tokens": 750,
+        "max_tokens": 1750,
         "temperature": 0.75,
         "top_p": 0.90,
         "frequency_penalty": 0.40,
         "presence_penalty": 0.35,
     },
-    "bramvanroy/fietje-2b-chat:q4_K_M": {
-        "max_tokens": 750,
-        "temperature": 0.75,
-        "top_p": 0.90,
-        "frequency_penalty": 0.40,
-        "presence_penalty": 0.35,
+    "saul:latest": {
+        "max_tokens": 600,           # Korter = minder kans op degeneratie
+        "temperature": 0.45,          # Lager = minder hallucinatie
+        "top_p": 0.87,               # Strikter sampling
+        "frequency_penalty": 0.7,    # Hoger = voorkomt repetitie
+        "presence_penalty": 0.7,     # Hoger = meer variatie
     },
 
     # Fietje - Dutch model, needs stricter settings to reduce hallucination
@@ -143,7 +157,7 @@ def get_model_settings(model_name: str) -> dict:
 
 # === SESSION ===
 SESSION_ENABLED = True      # Enable session persistence (save/load conversation history)
-MAX_MESSAGES = 6            # Rolling window size (0 = unlimited, keeps all messages)
+MAX_MESSAGES = 3            # Rolling window size (0 = unlimited, keeps all messages)
 
 # === AUDIO SETTINGS ===
 AUDIO_SAMPLE_RATE = 16000   # Sample rate for mic monitoring (16kHz = speech optimal)
@@ -157,8 +171,8 @@ SILENCE_DURATION = 1.2      # Seconden stilte voordat opname stopt
 SILENCE_DURATION_EXT = 2.0  # Seconden stilte voor extended listen (langere vragen)
 
 # Noise reduction
-NOISE_REDUCE = True         # AI noise suppression voor headphones/ruisige omgevingen
-NOISE_REDUCE_STRENGTH = 0.8 # 0.0-1.0: How aggressive (0.8 = strong, 0.5 = mild)
+NOISE_REDUCE = True          # AI noise suppression voor headphones/ruisige omgevingen
+NOISE_REDUCE_STRENGTH = 0.65 # 0.0-1.0: How aggressive (0.8 = strong, 0.5 = mild)
 
 # Whisper STT
 # Single model (used when no per-language models configured)
@@ -172,16 +186,16 @@ WHISPER_MODEL_NL = None       # Dutch-optimized model (None = use WHISPER_MODEL)
 # WHISPER_MODEL_EN = "/path/to/whisper-en-model"
 # WHISPER_MODEL_NL = "/path/to/whisper-nl-model"
 
-WHISPER_BEAM_SIZE = 4         # Higher = better quality, slower (1-10)
+WHISPER_BEAM_SIZE = 6         #was 5 Higher = better quality, slower (1-10)
 WHISPER_SAMPLE_RATE = 16000   # Whisper vereist 16kHz - niet aanpassen!
 STT_BLOCKSIZE = 4096          # Audio buffer voor spraakopname
-STT_QUEUE_TIMEOUT = 0.3       # Audio queue timeout (seconds) - lower = more responsive
+STT_QUEUE_TIMEOUT = 0.15     # was 0.3 Audio queue timeout (seconds) - lower = more responsive
 
 # Whisper anti-hallucination settings
 # These help prevent Whisper from generating fake text on silence/noise
 WHISPER_NO_SPEECH_THRESHOLD = 0.6       # 0.0-1.0: Probability threshold for "no speech"
 WHISPER_LOG_PROB_THRESHOLD = -1.0       # Log probability threshold for valid speech
-WHISPER_HALLUCINATION_SILENCE = 0.5     # Silence duration to trigger hallucination filter
+WHISPER_HALLUCINATION_SILENCE = 0.4     # Silence duration to trigger hallucination filter
 
 # === GPU SETTINGS ===
 USE_GPU = True              # Probeer GPU te gebruiken (met CPU fallback)
@@ -205,7 +219,7 @@ TTS_VOLUME_NL = 0.90         # Volume multiplier: 0.5=quiet, 1.0=normal, 2.0=lou
 
 # --- LANGUAGE DETECTION ---
 TTS_LANG_THRESHOLD = 0.15    # Dutch word ratio to trigger NL voice (0.15 = 15%)
-FORCE_LANGUAGE = "nl"        # None=auto-detect, "en"=always English, "nl"=always Dutch
+FORCE_LANGUAGE = None        # None=auto-detect, "en"=always English, "nl"=always Dutch
 
 # Language switch commands (voice triggers)
 LANG_SWITCH_EN = [
@@ -234,15 +248,15 @@ INTERRUPT_DURATION = 0.3     # Seconds of sustained volume before TTS stops
 
 # === WAKE WORD ===
 WAKE_WORD = "hey_jarvis"    # Options: hey_jarvis, alexa, hey_mycroft, timer, weather
-WAKE_THRESHOLD = 0.5        # 0.0-1.0: sensitivity (hoger = minder vals positief)
+WAKE_THRESHOLD = 0.4       # 0.0-1.0: sensitivity (hoger = minder vals positief)
                             # 0.5 = gevoelig, 0.7 = strenger, 0.8 = heel streng
 WAKE_WORD_WARMUP_DELAY = 1.0  # Seconds to wait for audio system warmup
 
 # === STAY AWAKE MODE ===
 # After a command, keep listening without requiring wake word
 STAY_AWAKE_ENABLED = True       # True = blijf luisteren na commando, False = slaap meteen
-STAY_AWAKE_TIMEOUT = 30.0       # Seconden stilte voordat hij alsnog gaat slapen (0 = nooit auto-sleep)
-SLEEP_COMMANDS = ["sleep", "slaap", "ga slapen", "go to sleep", "welterusten"]  # Expliciete slaap-commando's
+STAY_AWAKE_TIMEOUT = 30.0       # 30 Seconden stilte voordat hij alsnog gaat slapen (0 = nooit auto-sleep)
+SLEEP_COMMANDS = [ "ga slapen", "go to sleep", "welterusten"]  # Expliciete slaap-commando's
 
 # === CALENDAR ===
 CALENDAR_BACKEND = "evolution"  # "evolution" = GNOME/Evolution (syncs with Google), "google" = gcalcli, "local" = ~/.reminders
@@ -256,6 +270,65 @@ CALENDAR_ASK_LANGUAGE = True    # Ask "English or Dutch?" at start of calendar a
 # Language detection keywords (for calendar language prompt)
 CALENDAR_LANG_EN = ["english", "engels", "en"]
 CALENDAR_LANG_NL = ["dutch", "nederlands", "nl", "holland", "hollands"]
+
+# --- CALENDAR TRIGGER WORDS ---
+# These determine how voice commands are routed to calendar actions
+
+# Words that indicate we're talking about calendar/appointments
+CALENDAR_WORDS = [
+    # English
+    "calendar", "calander", "agenda", "schedule", "event", "meeting", "appointment", "alarm",
+    # Dutch
+    "afspraak", "afspraken", "afsprake", "vergadering", "bijeenkomst"
+]
+
+# Words that start a REMOVE action (checked at start of sentence)
+CALENDAR_REMOVE_PREFIXES = ("remove ", "delete ", "verwijder ", "wis ")
+
+# Trigger phrases for CHECK calendar
+CALENDAR_CHECK_WORDS = [
+    # English
+    "what", "check", "show", "list", "today", "tomorrow", "this week", "next week",
+    "what's on", "what do i have",
+    # Dutch
+    "wat", "bekijk", "toon", "welke", "vandaag", "morgen", "deze week", "volgende week",
+    "staat er op", "heb ik"
+]
+
+# Trigger phrases for CLEAR calendar (delete ALL events on a date)
+CALENDAR_CLEAR_WORDS = [
+    # English
+    "clear", "delete all", "remove all", "empty",
+    # Dutch
+    "leeg", "wis alles", "verwijder alles", "leeg maken"
+]
+
+# Trigger phrases for REMOVE specific event (interactive numbered selection)
+CALENDAR_REMOVE_WORDS = [
+    # English
+    "remove event", "delete event", "cancel event", "remove appointment",
+    "remove meeting", "delete meeting", "cancel meeting",
+    # Dutch
+    "verwijder afspraak", "wis afspraak", "annuleer afspraak", "afspraak verwijderen",
+    "verwijder een afspraak", "afspraak wissen", "vergadering verwijderen"
+]
+
+# Trigger phrases for ADD event
+CALENDAR_ADD_WORDS = [
+    # English
+    "add", "put", "create", "new", "schedule", "set", "plan", "book",
+    # Dutch
+    "voeg toe", "toevoegen", "nieuwe", "maak", "zet", "plaats", "inplannen"
+]
+
+# Phrases that trigger "remove ALL" in the numbered selection (not just "all" alone!)
+CALENDAR_REMOVE_ALL_PHRASES = [
+    # English
+    "remove all", "delete all", "clear all", "all of them",
+    # Dutch
+    "alles verwijderen", "verwijder alles", "allemaal verwijderen",
+    "alles wissen", "wis alles", "allemaal"
+]
 
 # Bilingual calendar prompts (en, nl)
 CALENDAR_PROMPTS = {
@@ -290,8 +363,7 @@ CALENDAR_PROMPTS = {
 # Words that trigger sleep (mic silenced, no transcription)
 # Each phrase must be a SEPARATE item in the list!
 DICTATE_SLEEP_WORDS = [
-    "sleep", "Sleep!", "slaap", "ga slapen", "welterusten", "tot zo",
-    "pause", "pauze", "pauzeer", "go to sleep"
+     "ga slapen", "welterusten", "go to sleep"
 ]
 # Wake uses WAKE_WORD above (e.g., "Hey Jarvis") - no transcription while sleeping
 
@@ -329,8 +401,8 @@ USE_EMOJIS = False          # Emojis in terminal output (zet uit bij compatibili
 DICTATE_EMOJIS = False      # Emoji replacements in dictation ("heart" → ❤️)
 
 # Log truncation (0 = unlimited, shows full text)
-LOG_CMD_LENGTH = 0          # Max chars for command log (e.g., "OLLAMA fallback: ...")
-LOG_OUTPUT_LENGTH = 0       # Max chars for terminal command output
+LOG_CMD_LENGTH = 750        # Max chars for command log (e.g., "OLLAMA fallback: ...")
+LOG_OUTPUT_LENGTH = 6       # Max chars for terminal command output
 
 # Terminal command execution
 TERMINAL_TIMEOUT = 600      # Timeout in seconds (600 = 10 minutes, 0 = no timeout)
@@ -344,8 +416,8 @@ AUTO_UNLOAD_CHECK_INTERVAL = 10.0  # How often to check for inactive models (sec
 VRAM_LOW_MEMORY_MODE = False    # Aggressive VRAM saving (unload immediately after use)
 
 # === DEBUG / VERBOSE ===
-VERBOSE_SESSION = False     # Print session load/clear messages ("Loaded X messages")
-DEBUG_API = False           # Print full API call details (URL, headers, payload, response)
+VERBOSE_SESSION = True     # Print session load/clear messages ("Loaded X messages")
+DEBUG_API = True           # Print full API call details (URL, headers, payload, response)
 
 # === INTENT ROUTER ===
 # Controls how voice commands are routed to modules
@@ -361,11 +433,11 @@ V2J_COMMAND_TIMEOUT = 10        # Timeout for voice2json commands (seconds)
 
 # -- Coding Module --
 CODING_MAX_TOKENS = 2000            # Max tokens for code generation (longer than chat)
-CODING_SPEAK_TRUNCATE_LENGTH = 300  # Truncate spoken output after this many chars
+CODING_SPEAK_TRUNCATE_LENGTH = 2000  # Truncate spoken output after this many chars
 
 # -- Terminal Module --
-TERMINAL_OUTPUT_TRUNCATE_LENGTH = 200  # Truncate terminal output for TTS
-TERMINAL_LARGE_FILE_SIZE = "100M"      # Size threshold for "find large files" command
+TERMINAL_OUTPUT_TRUNCATE_LENGTH = 2000  # Truncate terminal output for TTS
+TERMINAL_LARGE_FILE_SIZE = "200M"      #100M  Size threshold for "find large files" command
 
 # -- Dictation Module --
 DICTATION_POST_TYPE_DELAY = 1.5     # Seconds to wait after typing (keyboard settle time)

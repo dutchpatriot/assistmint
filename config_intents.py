@@ -367,7 +367,7 @@ KEYWORD_FALLBACK = {
         "key_home"
     ),
     "End": (
-        ["end", "go end", "einde", "naar einde"],
+        ["go to end", "go end", "end key", "press end", "einde", "naar einde", "naar het einde"],
         "key_end"
     ),
     "Backspace": (
