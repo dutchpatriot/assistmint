@@ -7,12 +7,31 @@ dateparser
 openwakeword
 scipy
 numpy
+noisereduce
+
+# Google Calendar integration
+gcalcli
 
 # Optional: vosk (legacy, replaced by faster-whisper)
 # vosk
 
-# Optional: torch with CUDA for GPU acceleration
-# pip install torch --index-url https://download.pytorch.org/whl/cu118
+# GPU acceleration (CUDA 12 - required for RTX 30/40 series)
+nvidia-cublas-cu12
+nvidia-cuda-runtime-cu12
+nvidia-cudnn-cu12
+nvidia-cuda-nvrtc-cu12
+nvidia-cufft-cu12
+
+# PyTorch with CUDA 12.1 support
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch
+
+# ONNX Runtime GPU for Piper TTS
+onnxruntime-gpu
+
+# Optional: TensorRT for Tensor Core optimization (RTX 20/30/40 series)
+# pip install tensorrt
+# Note: Requires matching CUDA version (check with nvcc --version)
 
 # System packages (install via apt):
 # sudo apt install remind sox alsa-utils python3.11 python3.11-venv

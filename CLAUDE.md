@@ -88,24 +88,62 @@ EVERY RESPONSE MUST END WITH: {you} SAID:
 - **Python**: 3.10+
 - **GPU**: CUDA-accelerated CUDA 11.8
 
-## Commands
-- Note commands here
--
--
--
--
+## RULE 3 - COMMAND MODE DOCUMENTATION (CRITICAL!)
 
+**Any changes to the Command Mode / Coding Module system MUST be documented in `README_COMMANDMODE.md`**
+
+This includes changes to:
+- `core/models/manager.py` - Model Manager
+- `modules/coding/module.py` - Coding Module
+- `modules/terminal/module.py` - Terminal Module (command execution)
+- `~/.assistmint/config.yaml` - Configuration format
+- `~/.assistmint/commands.txt` - Voice command aliases
+
+**Documentation Requirements:**
+1. Update the changelog section with date and version
+2. Document new voice commands or triggers
+3. Update architecture diagrams if structure changes
+4. Add troubleshooting steps for new features
+5. Keep Quick Reference section current
+
+**Why:** This is a POWERFUL module - voice-controlled pair programming with AI. It must be perfectly documented for future development and debugging.
+
+---
+
+## Commands
+- `python3 main_modular.py` - Start voice assistant
+- `python3 main_modular.py --type` - Text mode (no voice)
+- Voice: "Hey Jarvis" - Wake word
+- Voice: "Join me" - Enter coding mode
+- Voice: "Done" - Exit coding mode
+
+---
 
 ## Architecture
 
-Here
+```
+assistmint/
+├── core/
+│   ├── audio/          # STT (Whisper), TTS (Piper)
+│   ├── models/         # Model Manager (per-module LLM routing)
+│   ├── modules/        # Base module system
+│   ├── nlp/            # Filters, corrections
+│   └── resources/      # GPU/CPU resource management
+├── modules/
+│   ├── chat/           # General Q&A (fallback)
+│   ├── calendar/       # Calendar management
+│   ├── coding/         # Voice pair programming ⭐
+│   ├── dictation/      # Voice-to-text typing
+│   └── terminal/       # Voice command execution
+└── config.py           # Main configuration
+```
 
 ### Key Patterns
 
-- **Worker Threads**: Long operations (OCR, indexing, search) run on QThread with signal/slot communication
-- **Settings Singleton**: `SettingsManager` handles all persistent config at `~/.config/inspectorpdf/settings.json`
+- **Module System**: BaseModule with can_handle(), execute(), triggers, priority
+- **Model Manager**: Per-module LLM routing via `~/.assistmint/config.yaml`
+- **Continuous Mode**: Modules can disable wake word during sessions
 - **GPU Resource Manager**: Centralized VRAM management with CPU fallback
-- **SQLite FTS5**: Full-text search with 400ms debounce (configurable in `config.py`)
 
 ### Key Architectural Decisions
 

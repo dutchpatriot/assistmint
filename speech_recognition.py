@@ -2,46 +2,93 @@ import sounddevice as sd
 import queue
 import time
 import numpy as np
-import tempfile
-import wave
-from config import SILENCE_SKIP_DB, SPEECH_START_DB, SILENCE_DROP_DB, SILENCE_DURATION, SILENCE_DURATION_EXT
+import noisereduce as nr
+from config import (SILENCE_SKIP_DB, SPEECH_START_DB, SILENCE_DROP_DB, SILENCE_DURATION,
+                    SILENCE_DURATION_EXT, WHISPER_MODEL, WHISPER_BEAM_SIZE,
+                    WHISPER_SAMPLE_RATE, STT_BLOCKSIZE, USE_GPU, GPU_DEVICE_ID,
+                    WHISPER_COMPUTE_TYPE, NOISE_REDUCE)
+from colors import stt
 
 # Lazy load - deferred to avoid startup delay
 _device = None
+_device_index = 0
 _compute_type = None
 _whisper_model = None
 _WhisperModel = None
 
-def get_device():
-    global _device, _compute_type
-    if _device is None:
-        try:
-            import torch
-            if torch.cuda.is_available():
-                print("[STT] Using CUDA (GPU)")
-                _device, _compute_type = "cuda", "float16"
-            else:
-                print("[STT] Using CPU (no CUDA)")
-                _device, _compute_type = "cpu", "int8"
-        except ImportError:
-            print("[STT] Using CPU (no torch)")
-            _device, _compute_type = "cpu", "int8"
-    return _device, _compute_type
+def _select_best_gpu():
+    """Auto-select GPU with most VRAM, or use configured GPU_DEVICE_ID."""
+    import torch
 
-def init_whisper(model_size="base"):
+    if GPU_DEVICE_ID is not None:
+        return GPU_DEVICE_ID
+
+    # Auto-select: pick GPU with most VRAM
+    num_gpus = torch.cuda.device_count()
+    if num_gpus == 0:
+        return 0
+    if num_gpus == 1:
+        return 0
+
+    # Multiple GPUs: select by VRAM
+    best_gpu = 0
+    best_vram = 0
+    for i in range(num_gpus):
+        vram = torch.cuda.get_device_properties(i).total_memory
+        name = torch.cuda.get_device_name(i)
+        print(stt(f"  GPU {i}: {name} ({vram // (1024**3)}GB)"))
+        if vram > best_vram:
+            best_vram = vram
+            best_gpu = i
+
+    return best_gpu
+
+
+def get_device():
+    """Detect best available device (GPU with CPU fallback)."""
+    global _device, _device_index, _compute_type
+    if _device is None:
+        if USE_GPU:
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    gpu_id = _select_best_gpu()
+                    gpu_name = torch.cuda.get_device_name(gpu_id)
+                    gpu_mem = torch.cuda.get_device_properties(gpu_id).total_memory // (1024**3)
+                    print(stt(f"Using CUDA: {gpu_name} ({gpu_mem}GB)"))
+                    _device = "cuda"
+                    _device_index = gpu_id
+                    _compute_type = WHISPER_COMPUTE_TYPE
+                else:
+                    print(stt("GPU requested but CUDA not available - using CPU"))
+                    _device, _device_index, _compute_type = "cpu", 0, "int8"
+            except ImportError:
+                print(stt("GPU requested but torch not found - using CPU"))
+                _device, _device_index, _compute_type = "cpu", 0, "int8"
+            except Exception as e:
+                print(stt(f"GPU init failed ({e}) - using CPU"))
+                _device, _device_index, _compute_type = "cpu", 0, "int8"
+        else:
+            print(stt("Using CPU (GPU disabled in config)"))
+            _device, _device_index, _compute_type = "cpu", 0, "int8"
+    return _device, _device_index, _compute_type
+
+def init_whisper(model_size=None):
     """Initialize Whisper model. Sizes: tiny, base, small, medium, large-v2"""
     global _whisper_model, _WhisperModel
+    if model_size is None:
+        model_size = WHISPER_MODEL
     if _whisper_model is None:
         # Lazy import
         if _WhisperModel is None:
-            print("[STT] Loading faster-whisper library...")
+            print(stt("Loading faster-whisper library..."))
             from faster_whisper import WhisperModel
             _WhisperModel = WhisperModel
 
-        device, compute_type = get_device()
-        print(f"[STT] Loading Whisper model '{model_size}' on {device}...")
-        _whisper_model = _WhisperModel(model_size, device=device, compute_type=compute_type)
-        print("[STT] Whisper ready!")
+        device, device_index, compute_type = get_device()
+        print(stt(f"Loading Whisper model '{model_size}' on {device} (GPU {device_index})..."))
+        _whisper_model = _WhisperModel(model_size, device=device, device_index=device_index, compute_type=compute_type)
+        print(stt("Whisper ready!"))
     return _whisper_model
 
 def list_microphones():
@@ -87,7 +134,7 @@ def whisper_speech_to_text(selected_device, samplerate, extended_listen=False):
         q.put(indata.copy())
 
     try:
-        with sd.InputStream(samplerate=int(samplerate), blocksize=4096,
+        with sd.InputStream(samplerate=int(samplerate), blocksize=STT_BLOCKSIZE,
                            device=selected_device['index'], dtype='float32',
                            channels=1, callback=callback):
 
@@ -145,33 +192,61 @@ def whisper_speech_to_text(selected_device, samplerate, extended_listen=False):
         rms = np.sqrt(np.mean(audio_data ** 2))
         avg_db = 20 * np.log10(rms) if rms > 1e-10 else -60.0
         if avg_db < SILENCE_SKIP_DB:  # Too quiet, probably no speech
-            print(f"[STT] Skipping - too quiet ({avg_db:.1f}dB)")
+            print(stt(f"Skipping - too quiet ({avg_db:.1f}dB)"))
             return ""
 
-        # Save to temp WAV file (Whisper needs file input)
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            temp_path = f.name
-            with wave.open(f.name, 'wb') as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(2)  # 16-bit
-                wf.setframerate(int(samplerate))
-                wf.writeframes((audio_data * 32767).astype(np.int16).tobytes())
+        # Transcribe directly from memory (no temp file needed)
+        # faster-whisper accepts numpy array - resample to 16kHz if needed
+        if int(samplerate) != WHISPER_SAMPLE_RATE:
+            from scipy import signal
+            num_samples = int(len(audio_data) * WHISPER_SAMPLE_RATE / samplerate)
+            audio_16k = signal.resample(audio_data, num_samples).astype(np.float32)
+        else:
+            audio_16k = audio_data.astype(np.float32)
 
-        # Transcribe
-        print("[STT] Transcribing...")
-        segments, info = model.transcribe(temp_path, beam_size=5)
+        # Apply noise reduction if enabled
+        if NOISE_REDUCE:
+            print(stt("Reducing noise..."))
+            audio_16k = nr.reduce_noise(y=audio_16k, sr=WHISPER_SAMPLE_RATE, prop_decrease=0.8)
+
+        print(stt("Transcribing..."))
+        segments, info = model.transcribe(
+            audio_16k,
+            beam_size=WHISPER_BEAM_SIZE,
+            # Anti-hallucination settings
+            no_speech_threshold=0.6,           # Skip if probability of no speech > 60%
+            log_prob_threshold=-1.0,           # Skip low confidence segments
+            hallucination_silence_threshold=0.5,  # Skip hallucinations after 0.5s silence
+            condition_on_previous_text=False,  # Don't let previous text influence (reduces repetition)
+        )
         text = " ".join([seg.text for seg in segments]).strip()
 
-        # Cleanup
-        import os
-        os.unlink(temp_path)
+        # Filter non-Latin hallucinations (Hindi, Chinese, Arabic, etc.)
+        import re
+        # Remove leading non-ASCII characters and clean up
+        text = re.sub(r'^[^\x00-\x7F]+\s*', '', text)
+        # Remove any remaining non-Latin script blocks
+        text = re.sub(r'[\u0900-\u097F]+', '', text)  # Devanagari (Hindi)
+        text = re.sub(r'[\u4E00-\u9FFF]+', '', text)  # Chinese
+        text = re.sub(r'[\u0600-\u06FF]+', '', text)  # Arabic
+        text = re.sub(r'[\u0400-\u04FF]+', '', text)  # Cyrillic
+        text = re.sub(r'[\u3040-\u30FF]+', '', text)  # Japanese
+        text = re.sub(r'[\uAC00-\uD7AF]+', '', text)  # Korean
+        text = re.sub(r'\s+', ' ', text).strip()
 
-        print(f"[STT] Result: {text}")
+        print(stt(f"Result: {text}"))
         return text
 
     except Exception as e:
         print(f"\nAn error occurred during audio processing: {e}")
+        # Try to free GPU memory on OOM errors
+        if "out of memory" in str(e).lower():
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    print(stt("Cleared GPU cache after OOM"))
+            except:
+                pass
     return ""
 
-# Alias for compatibility
-vosk_speech_to_text = whisper_speech_to_text

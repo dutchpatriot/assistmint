@@ -1,5 +1,6 @@
 import json
 import os
+from colors import learn
 
 CORRECTIONS_FILE = os.path.expanduser("~/.assistmint_corrections.json")
 
@@ -26,7 +27,7 @@ def apply_corrections(text):
     for wrong, right in corrections.items():
         if wrong.lower() in original:
             text = text.lower().replace(wrong.lower(), right)
-            print(f"[LEARN] Auto-corrected: '{wrong}' → '{right}'")
+            print(learn(f"Auto-corrected: '{wrong}' → '{right}'"))
 
     return text
 
@@ -35,7 +36,7 @@ def add_correction(wrong, right):
     corrections = load_corrections()
     corrections[wrong.lower()] = right
     save_corrections(corrections)
-    print(f"[LEARN] Saved: '{wrong}' → '{right}'")
+    print(learn(f"Saved: '{wrong}' → '{right}'"))
 
 def list_corrections():
     """List all stored corrections."""
@@ -46,7 +47,7 @@ def list_corrections():
             print(f"  '{wrong}' → '{right}'")
         print()
     else:
-        print("[LEARN] No corrections stored yet.")
+        print(learn("No corrections stored yet."))
     return corrections
 
 def remove_correction(wrong):
@@ -55,6 +56,6 @@ def remove_correction(wrong):
     if wrong.lower() in corrections:
         del corrections[wrong.lower()]
         save_corrections(corrections)
-        print(f"[LEARN] Removed correction for '{wrong}'")
+        print(learn(f"Removed correction for '{wrong}'"))
         return True
     return False

@@ -3,6 +3,8 @@ import numpy as np
 from openwakeword.model import Model
 from scipy import signal
 import time
+from colors import wake
+from config import WAKE_WORD, WAKE_THRESHOLD, AUDIO_SAMPLE_RATE
 
 # Global wake word model
 _oww_model = None
@@ -11,11 +13,10 @@ def init_wake_word():
     """Initialize OpenWakeWord model."""
     global _oww_model
     if _oww_model is None:
-        print("Loading wake word model...")
-        # Use pre-trained "hey jarvis" - closest to "hey google"
-        # Can also use: "alexa", "hey_mycroft", "timer", "weather"
-        _oww_model = Model(wakeword_models=["hey_jarvis"])
-        print("Wake word model ready! Say 'Hey Jarvis' to activate.")
+        print(wake("Loading wake word model..."))
+        # Load all default wake word models (includes hey_jarvis, alexa, etc.)
+        _oww_model = Model()
+        print(wake(f"Ready! Say '{WAKE_WORD.replace('_', ' ').title()}' to activate."))
     return _oww_model
 
 def listen_for_wake_word(selected_device, samplerate, timeout=None):
@@ -26,7 +27,7 @@ def listen_for_wake_word(selected_device, samplerate, timeout=None):
     model = init_wake_word()
 
     # OpenWakeWord expects 16kHz, resample if needed
-    target_rate = 16000
+    target_rate = AUDIO_SAMPLE_RATE
     native_rate = int(samplerate)
     need_resample = native_rate != target_rate
 
@@ -57,13 +58,13 @@ def listen_for_wake_word(selected_device, samplerate, timeout=None):
         # Feed to wake word model
         prediction = model.predict(audio_data)
 
-        for wakeword, score in prediction.items():
-            if score > 0.6:
-                print(f"\n[WAKE] Detected: {wakeword} ({score:.2f})")
-                detected = True
-                return
+        # Only trigger on the configured wake word
+        if WAKE_WORD in prediction and prediction[WAKE_WORD] > WAKE_THRESHOLD:
+            print(f"\n{wake(f'Detected: {WAKE_WORD} ({prediction[WAKE_WORD]:.2f})')}")
+            detected = True
+            return
 
-    print("[WAKE] Listening... (say 'Hey Jarvis')")
+    print(wake(f"Listening... (say '{WAKE_WORD.replace('_', ' ').title()}')"))
 
     try:
         with sd.InputStream(
