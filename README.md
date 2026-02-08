@@ -115,6 +115,18 @@ python3 main_modular.py
 python3 main_modular.py --type
 ```
 
+### New in v2.2
+
+- **Programming Mode**: Say "let's program" or "coding mode" to enter interactive programming session
+  - Offers to open a terminal with `tail -f` on the code output file
+  - Code from LLM responses auto-saved to `~/.assistmint/last_code.txt`
+  - Say "save code" to save current code to clipboard-ready file
+  - Say "write code" to save to timestamped file in `~/.assistmint/code/`
+- **Improved Dictation**: Better punctuation handling - no more periods after single words, proper spacing between sentences
+- **Session Memory**: 50-message rolling window for better conversation context (25 complete exchanges)
+- **Ollama Health Checks**: Graceful timeout and fallback when Ollama is unavailable
+- **Calendar Error Handling**: Spoken feedback when LLM extraction fails
+
 ### New in v2.0
 
 - **Automatic Model Switching**: Switches between English (qwen2.5:3b) and Dutch (fietje) models based on language
@@ -164,6 +176,22 @@ Calendar asks "English or Dutch?" at the start - answer in either language to se
 |--------------|--------------|--------|
 | "Run command" | "Voer commando uit" | Execute shell command |
 | "Terminal" | "Terminal" | Execute shell command |
+
+### Programming Mode (Voice Pair Programming!)
+| Command (EN) | Command (NL) | Action |
+|--------------|--------------|--------|
+| "Let's program" | "Laten we programmeren" | Enter programming mode |
+| "Coding mode" | "Codeermodus" | Enter programming mode |
+| "Type" | "Typen" | Switch to keyboard input (flags, vars, commands) |
+| "Save code" | "Bewaar code" | Save last code to clipboard file |
+| "Write code" | "Schrijf code" | Save to timestamped file |
+
+**How it works:**
+1. Say "let's program" - Jarvis asks if you want to tail the code file
+2. Say "yes" - Opens gnome-terminal with `tail -f ~/.assistmint/last_code.txt`
+3. Ask programming questions - code auto-saves to the file as you talk
+4. Say "type" to switch to keyboard for technical input (flags, vars, commands)
+5. Watch code appear live in the terminal!
 
 ### Other
 | Command | Action |
@@ -417,9 +445,11 @@ assistmint/
 │   ├── dictation/          # Voice typing
 │   └── terminal/           # Shell commands
 │
-└── ~/.assistmint/          # User config
+└── ~/.assistmint/          # User config & data
     ├── commands.txt        # Custom voice commands
-    └── config.yaml         # User settings
+    ├── config.yaml         # User settings
+    ├── last_code.txt       # Auto-saved code (tail -f this!)
+    └── code/               # Saved code files (timestamped)
 ```
 
 ## Troubleshooting

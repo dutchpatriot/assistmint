@@ -1,7 +1,0 @@
-[Desktop Entry]
-Name=Voice Assistant
-Comment=Launch the Voice Assistant
-Exec=/home/marco/Work/ai/llm/assistmint/start_assistant.sh
-Icon=/home/marco/Work/ai/llm/assistmint/tux.png
-Terminal=true
-Type=Application
